@@ -1,0 +1,22 @@
+{
+  "name": "x-tweet-tracker-forwarder",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Fetch tweets from Voyager API, mark as sent, and forward to Telegram group.",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "dotenv": "^17.3.1",
+    "grammy": "^1.41.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}
