@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { Bot } from 'grammy';
 import { claimOne, markSent } from './api.js';
-import { envInt, mustEnv } from './env.js';
+import { mustEnv } from './env.js';
 
 const MENTION = '@assistant_open_claw_bot';
 
@@ -19,8 +19,7 @@ async function main() {
   const bot = new Bot(mustEnv('TELEGRAM_BOT_TOKEN'));
   const chatId = Number(mustEnv('TELEGRAM_CHAT_ID'));
 
-  const delaySeconds = envInt('SEND_INTERVAL_SECONDS', 30);
-  const delayMs = Math.max(1, delaySeconds) * 1000;
+  const delayMs = 60 * 1000;
 
   let sent = 0;
 

@@ -17,7 +17,6 @@ Mention is hardcoded in the message format:
 - `API_TOKEN` — same value as API `ADMIN_TOKEN`
 - `TELEGRAM_BOT_TOKEN` — Voyager Bot token
 - `TELEGRAM_CHAT_ID` — target group chat id (e.g. `-100...`)
-- `SEND_INTERVAL_SECONDS` — delay between messages (default: 30)
 
 ## Run
 ```bash
