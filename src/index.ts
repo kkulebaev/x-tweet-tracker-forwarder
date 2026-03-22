@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { Bot } from 'grammy';
 import { mustEnv } from './env.js';
-import { ack, ensureGroup, readOne } from './redis.js';
+import { ack, autoClaimPending, ensureGroup, readOneNew } from './redis.js';
 
 const MENTION = '@assistant_open_claw_bot';
 
@@ -32,15 +32,24 @@ async function main() {
   let sent = 0;
   let seen = 0;
 
+  const consumer = 'voyager-forwarder-1';
+
   // Drain the queue until it becomes empty.
   while (true) {
-    const item = await readOne('voyager-forwarder-1', 1500);
+    // First: try to recover pending messages (if previous run crashed before XACK)
+    const reclaimed = await autoClaimPending({ consumer, minIdleMs: 60_000, count: 1 });
+    const item = reclaimed.length ? reclaimed[0] : await readOneNew(consumer, 1500);
+
     if (!item) {
       console.log('queue empty, exiting', { sent, seen });
       break;
     }
 
     seen += 1;
+
+    if (reclaimed.length) {
+      console.log('recovered pending message', { id: item.id });
+    }
 
     const payload = item.payload;
     if (!payload?.url) {
