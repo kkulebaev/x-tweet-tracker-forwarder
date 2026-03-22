@@ -21,21 +21,40 @@ async function main() {
   // Fixed: one message every 30 seconds
   const delayMs = 30 * 1000;
 
+  console.log('forwarder start', {
+    chatId,
+    delaySeconds: delayMs / 1000,
+  });
+
   await ensureGroup();
+  console.log('redis consumer group ensured');
 
   let sent = 0;
+  let seen = 0;
 
   // Drain the queue until it becomes empty.
   while (true) {
     const item = await readOne('voyager-forwarder-1', 1500);
-    if (!item) break;
+    if (!item) {
+      console.log('queue empty, exiting', { sent, seen });
+      break;
+    }
+
+    seen += 1;
 
     const payload = item.payload;
     if (!payload?.url) {
-      // Skip malformed message
+      console.warn('skip malformed stream entry', { id: item.id });
       await ack(item.id);
       continue;
     }
+
+    console.log('sending', {
+      id: item.id,
+      tweetId: payload.tweetId,
+      xUsername: payload.xUsername,
+      url: payload.url,
+    });
 
     const msg = formatMessage({
       xUsername: payload.xUsername,
@@ -49,6 +68,8 @@ async function main() {
 
     await ack(item.id);
     sent += 1;
+
+    console.log('sent+acked', { id: item.id, sent });
 
     await sleep(delayMs);
   }
