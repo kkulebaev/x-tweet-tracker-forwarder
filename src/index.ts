@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { Bot } from 'grammy';
-import { claimOne, markSent } from './api.js';
 import { mustEnv } from './env.js';
+import { ack, ensureGroup, readOne } from './redis.js';
 
 const MENTION = '@assistant_open_claw_bot';
 
@@ -11,7 +11,6 @@ function sleep(ms: number) {
 
 function formatMessage(args: { xUsername?: string | null; url: string; text: string }) {
   const header = `${MENTION} новый твит от @${args.xUsername ?? 'unknown'}`;
-  // Keep it simple: plain text, no previews should be handled by Telegram settings.
   return `${header}\n${args.url}\n\n${args.text}`.trim();
 }
 
@@ -19,29 +18,38 @@ async function main() {
   const bot = new Bot(mustEnv('TELEGRAM_BOT_TOKEN'));
   const chatId = Number(mustEnv('TELEGRAM_CHAT_ID'));
 
-  const delayMs = 60 * 1000;
+  // Fixed: one message every 30 seconds
+  const delayMs = 30 * 1000;
+
+  await ensureGroup();
 
   let sent = 0;
 
+  // Drain the queue until it becomes empty.
   while (true) {
-    const r = await claimOne();
-    if (!r.tweet) break;
+    const item = await readOne('voyager-forwarder-1', 1500);
+    if (!item) break;
+
+    const payload = item.payload;
+    if (!payload?.url) {
+      // Skip malformed message
+      await ack(item.id);
+      continue;
+    }
 
     const msg = formatMessage({
-      xUsername: r.account?.xUsername ?? null,
-      url: r.tweet.url,
-      text: r.tweet.text,
+      xUsername: payload.xUsername,
+      url: payload.url,
+      text: payload.text,
     });
 
     await bot.api.sendMessage(chatId, msg, {
-      // grammY types prefer link_preview_options, but this flag works in Telegram API as well
       link_preview_options: { is_disabled: true },
     } as any);
 
-    await markSent(r.tweet.tweet_id);
+    await ack(item.id);
     sent += 1;
 
-    // throttle
     await sleep(delayMs);
   }
 
