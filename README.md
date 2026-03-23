@@ -13,9 +13,6 @@ Behavior:
 - drains the queue and **exits** when there are no more messages
 - recovers stuck messages from the pending list (`XAUTOCLAIM`, min idle 60s)
 
-Mention is hardcoded in the message format:
-- `@assistant_open_claw_bot`
-
 ## Environment variables
 - `REDIS_URL` — Railway Redis connection string
 - `TELEGRAM_BOT_TOKEN` — Voyager Bot token
