@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Drain Redis stream events and forward to Telegram group (Voyager).", 
+  "description": "Drain Redis stream events and forward to Telegram group (Voyager).",
   "scripts": {
     "dev": "tsx src/index.ts",
     "build": "tsc -p tsconfig.json",
@@ -11,6 +11,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@openrouter/sdk": "^0.9.11",
     "dotenv": "^17.3.1",
     "grammy": "^1.41.1",
     "ioredis": "^5.10.1"

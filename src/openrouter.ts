@@ -1,3 +1,5 @@
+import { OpenRouter } from '@openrouter/sdk';
+
 type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 
 function env(key: string) {
@@ -6,6 +8,17 @@ function env(key: string) {
 
 export function openRouterEnabled() {
   return Boolean(env('OPENROUTER_API_KEY') && env('OPENROUTER_MODEL'));
+}
+
+let client: OpenRouter | null = null;
+
+function openRouter() {
+  if (!client) {
+    client = new OpenRouter({
+      apiKey: env('OPENROUTER_API_KEY'),
+    });
+  }
+  return client;
 }
 
 export async function generateTelegramPost(args: {
@@ -70,50 +83,29 @@ export async function generateTelegramPost(args: {
     args.text,
   ].join('\n');
 
-  const body = {
-    model,
-    messages: [
-      { role: 'system', content: system } satisfies ChatMessage,
-      { role: 'user', content: user } satisfies ChatMessage,
-    ],
-    temperature: 0.7,
-  };
-
   const start = Date.now();
 
-  const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-      // Optional, but recommended by OpenRouter for attribution.
-      'X-Title': 'x-tweet-tracker-forwarder',
+  // OpenRouter SDK uses OpenAI-compatible params inside chatGenerationParams.
+  const res: any = await openRouter().chat.send({
+    chatGenerationParams: {
+      model,
+      messages: [
+        { role: 'system', content: system } satisfies ChatMessage,
+        { role: 'user', content: user } satisfies ChatMessage,
+      ],
+      temperature: 0.7,
     },
-    body: JSON.stringify(body),
   });
 
   const ms = Date.now() - start;
-  const requestId = resp.headers.get('x-request-id') ?? resp.headers.get('x-openrouter-request-id');
 
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => '');
-    console.warn('openrouter error', {
-      status: resp.status,
-      ms,
-      requestId,
-      body: text.slice(0, 500),
-    });
-    throw new Error(`OpenRouter request failed: ${resp.status}`);
-  }
-
-  const data: any = await resp.json();
-  const content = data?.choices?.[0]?.message?.content;
+  const content = res?.choices?.[0]?.message?.content;
   if (!content || typeof content !== 'string') {
-    console.warn('openrouter bad response', { ms, requestId });
+    console.warn('openrouter bad response', { ms, model });
     throw new Error('OpenRouter response missing choices[0].message.content');
   }
 
-  console.log('openrouter ok', { ms, requestId, model });
+  console.log('openrouter ok', { ms, model });
 
   return content.trim();
 }
