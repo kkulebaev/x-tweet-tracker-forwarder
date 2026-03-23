@@ -47,6 +47,31 @@ export type TweetEventPayload = {
 
 type StreamEntry = [id: string, kv: string[]];
 
+type XReadGroupResponse = [stream: string, entries: StreamEntry[]][];
+
+type AutoClaimResponse = [nextStartId: string, entries: StreamEntry[], deletedIds: string[]];
+
+function isStringArray(x: unknown): x is string[] {
+  return Array.isArray(x) && x.every((v) => typeof v === 'string');
+}
+
+function isStreamEntry(x: unknown): x is StreamEntry {
+  return Array.isArray(x) && typeof x[0] === 'string' && isStringArray(x[1]);
+}
+
+function isXReadGroupResponse(x: unknown): x is XReadGroupResponse {
+  return (
+    Array.isArray(x) &&
+    x.every(
+      (row) => Array.isArray(row) && typeof row[0] === 'string' && Array.isArray(row[1]) && row[1].every(isStreamEntry),
+    )
+  );
+}
+
+function isAutoClaimResponse(x: unknown): x is AutoClaimResponse {
+  return Array.isArray(x) && typeof x[0] === 'string' && Array.isArray(x[1]) && x[1].every(isStreamEntry) && Array.isArray(x[2]);
+}
+
 function parseEntry(entry: StreamEntry) {
   const [id, kv] = entry;
   const obj: Record<string, string> = {};
@@ -54,7 +79,7 @@ function parseEntry(entry: StreamEntry) {
 
   const payloadRaw = obj.payload;
   if (!payloadRaw) {
-    return { id, payload: null as TweetEventPayload | null };
+    return { id, payload: null };
   }
 
   let payload: TweetEventPayload;
@@ -73,55 +98,43 @@ export async function autoClaimPending(args: { consumer: string; minIdleMs: numb
   // We start from 0-0 to claim the oldest pending.
   const count = Math.min(Math.max(args.count ?? 1, 1), 20);
 
-  const redisWithAutoClaim = r as unknown as {
-    xautoclaim: (
-      key: string,
-      group: string,
-      consumer: string,
-      minIdleMs: number,
-      start: string,
-      countLabel: 'COUNT',
-      count: number,
-    ) => Promise<unknown>;
-  };
-
-  const resp = (await redisWithAutoClaim.xautoclaim(
+  const resp: unknown = await r.call(
+    'XAUTOCLAIM',
     STREAM_KEY,
     GROUP,
     args.consumer,
-    args.minIdleMs,
+    String(args.minIdleMs),
     '0-0',
     'COUNT',
-    count,
-  )) as unknown as [nextStartId: string, entries: StreamEntry[], deletedIds: string[]] | null;
+    String(count),
+  );
 
-  // resp = [nextStartId, entries, deletedIds]
-  if (!resp || !resp[1] || resp[1].length === 0) return [];
+  if (!isAutoClaimResponse(resp)) return [];
+  if (resp[1].length === 0) return [];
 
   return resp[1].map(parseEntry);
 }
 
-type XReadGroupResponse = [stream: string, entries: StreamEntry[]][];
-
 export async function readOneNew(consumer: string, blockMs: number) {
   const r = redis();
-  const resp = (await r.xreadgroup(
+
+  const resp: unknown = await r.call(
+    'XREADGROUP',
     'GROUP',
     GROUP,
     consumer,
     'COUNT',
-    1,
+    '1',
     'BLOCK',
-    blockMs,
+    String(blockMs),
     'STREAMS',
     STREAM_KEY,
     '>',
-  )) as unknown as XReadGroupResponse | null;
+  );
 
-  if (!resp) return null;
+  if (!isXReadGroupResponse(resp)) return null;
 
-  const first = resp[0];
-  const entries = first?.[1];
+  const entries = resp[0]?.[1];
   if (!entries?.length) return null;
 
   return parseEntry(entries[0]);
