@@ -109,3 +109,19 @@ export async function ack(id: string) {
   const r = redis();
   await r.xack(STREAM_KEY, GROUP, id);
 }
+
+export async function closeRedis() {
+  if (!client) return;
+  try {
+    await client.quit();
+  } catch {
+    // ignore
+  } finally {
+    try {
+      client.disconnect();
+    } catch {
+      // ignore
+    }
+    client = null;
+  }
+}
