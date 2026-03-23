@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { Bot } from 'grammy';
 import { mustEnv } from './env.js';
+import { generateTelegramPost, openRouterEnabled } from './openrouter.js';
 import { ack, autoClaimPending, closeRedis, ensureGroup, readOneNew } from './redis.js';
 
 const MENTION = '@assistant_open_claw_bot';
@@ -24,6 +25,7 @@ async function main() {
   console.log('forwarder start', {
     chatId,
     delaySeconds: delayMs / 1000,
+    openRouterEnabled: openRouterEnabled(),
   });
 
   await ensureGroup();
@@ -66,11 +68,23 @@ async function main() {
         url: payload.url,
       });
 
-      const msg = formatMessage({
+      let msg = formatMessage({
         xUsername: payload.xUsername,
         url: payload.url,
         text: payload.text,
       });
+
+      if (openRouterEnabled()) {
+        try {
+          msg = await generateTelegramPost({
+            xUsername: payload.xUsername,
+            url: payload.url,
+            text: payload.text,
+          });
+        } catch (e) {
+          console.warn('openrouter generate failed, using fallback message', String((e as any)?.message ?? e));
+        }
+      }
 
       await bot.api.sendMessage(chatId, msg, {
         link_preview_options: { is_disabled: true },

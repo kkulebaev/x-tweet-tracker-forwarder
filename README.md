@@ -21,6 +21,12 @@ Mention is hardcoded in the message format:
 - `TELEGRAM_BOT_TOKEN` — Voyager Bot token
 - `TELEGRAM_CHAT_ID` — target group chat id (e.g. `-100...`)
 
+OpenRouter (optional):
+- `OPENROUTER_API_KEY`
+- `OPENROUTER_MODEL`
+
+If `OPENROUTER_*` vars are set, the forwarder rewrites tweet text into a detailed Russian Telegram post (no hashtags) before publishing.
+
 ## Rate limit
 - Sends **one message every 30 seconds** (hardcoded).
 
