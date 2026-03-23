@@ -87,6 +87,7 @@ async function main() {
       }
 
       await bot.api.sendMessage(chatId, msg, {
+        parse_mode: 'Markdown',
         link_preview_options: { is_disabled: true },
       } as any);
 
