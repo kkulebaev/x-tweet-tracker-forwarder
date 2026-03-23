@@ -10,6 +10,11 @@ function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function errorMessage(e: unknown) {
+  if (e instanceof Error) return e.message;
+  return String(e);
+}
+
 function formatMessage(args: { xUsername?: string | null; url: string; text: string }) {
   const header = `${MENTION} новый твит от @${args.xUsername ?? 'unknown'}`;
   return `${header}\n${args.url}\n\n${args.text}`.trim();
@@ -82,14 +87,14 @@ async function main() {
             text: payload.text,
           });
         } catch (e) {
-          console.warn('openrouter generate failed, using fallback message', String((e as any)?.message ?? e));
+          console.warn('openrouter generate failed, using fallback message', errorMessage(e));
         }
       }
 
       await bot.api.sendMessage(chatId, msg, {
         parse_mode: 'Markdown',
         link_preview_options: { is_disabled: true },
-      } as any);
+      });
 
       await ack(item.id);
       sent += 1;

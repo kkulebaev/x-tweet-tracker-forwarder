@@ -1,4 +1,5 @@
 import { OpenRouter } from '@openrouter/sdk';
+import type { ChatResponse } from '@openrouter/sdk/models/chatresponse';
 
 type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 
@@ -86,7 +87,7 @@ export async function generateTelegramPost(args: {
   const start = Date.now();
 
   // OpenRouter SDK uses OpenAI-compatible params inside chatGenerationParams.
-  const res: any = await openRouter().chat.send({
+  const res = (await openRouter().chat.send({
     chatGenerationParams: {
       model,
       messages: [
@@ -94,12 +95,13 @@ export async function generateTelegramPost(args: {
         { role: 'user', content: user } satisfies ChatMessage,
       ],
       temperature: 0.7,
+      stream: false,
     },
-  });
+  })) as ChatResponse;
 
   const ms = Date.now() - start;
 
-  const content = res?.choices?.[0]?.message?.content;
+  const content = res.choices?.[0]?.message?.content;
   if (!content || typeof content !== 'string') {
     console.warn('openrouter bad response', { ms, model });
     throw new Error('OpenRouter response missing choices[0].message.content');

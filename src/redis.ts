@@ -1,6 +1,11 @@
 import Redis from 'ioredis';
 import { mustEnv } from './env.js';
 
+function errorMessage(e: unknown) {
+  if (e instanceof Error) return e.message;
+  return String(e);
+}
+
 export const STREAM_KEY = 'voyager:tweets';
 export const GROUP = 'forwarder';
 
@@ -12,7 +17,7 @@ export function redis() {
       maxRetriesPerRequest: 2,
     });
     client.on('error', (e) => {
-      console.warn('redis error', String((e as any)?.message ?? e));
+      console.warn('redis error', errorMessage(e));
     });
   }
   return client;
@@ -24,7 +29,7 @@ export async function ensureGroup() {
     // Create consumer group at the end ($) so we only process new events.
     await r.xgroup('CREATE', STREAM_KEY, GROUP, '$', 'MKSTREAM');
   } catch (e) {
-    const msg = String((e as any)?.message ?? e);
+    const msg = errorMessage(e);
     // BUSYGROUP Consumer Group name already exists
     if (msg.includes('BUSYGROUP')) return;
     throw e;
@@ -40,14 +45,16 @@ export type TweetEventPayload = {
   createdAt: string;
 };
 
-function parseEntry(entry: any) {
+type StreamEntry = [id: string, kv: string[]];
+
+function parseEntry(entry: StreamEntry) {
   const [id, kv] = entry;
   const obj: Record<string, string> = {};
-  for (let i = 0; i < kv.length; i += 2) obj[String(kv[i])] = String(kv[i + 1]);
+  for (let i = 0; i < kv.length; i += 2) obj[kv[i]!] = kv[i + 1]!;
 
   const payloadRaw = obj.payload;
   if (!payloadRaw) {
-    return { id: String(id), payload: null as any };
+    return { id, payload: null as TweetEventPayload | null };
   }
 
   let payload: TweetEventPayload;
@@ -57,7 +64,7 @@ function parseEntry(entry: any) {
     payload = { type: 'unknown', tweetId: obj.tweetId ?? '', url: '', text: payloadRaw, xUsername: null, createdAt: '' };
   }
 
-  return { id: String(id), payload };
+  return { id, payload };
 }
 
 export async function autoClaimPending(args: { consumer: string; minIdleMs: number; count?: number }) {
@@ -66,7 +73,19 @@ export async function autoClaimPending(args: { consumer: string; minIdleMs: numb
   // We start from 0-0 to claim the oldest pending.
   const count = Math.min(Math.max(args.count ?? 1, 1), 20);
 
-  const resp = (await (r as any).xautoclaim(
+  const redisWithAutoClaim = r as unknown as {
+    xautoclaim: (
+      key: string,
+      group: string,
+      consumer: string,
+      minIdleMs: number,
+      start: string,
+      countLabel: 'COUNT',
+      count: number,
+    ) => Promise<unknown>;
+  };
+
+  const resp = (await redisWithAutoClaim.xautoclaim(
     STREAM_KEY,
     GROUP,
     args.consumer,
@@ -74,13 +93,15 @@ export async function autoClaimPending(args: { consumer: string; minIdleMs: numb
     '0-0',
     'COUNT',
     count,
-  )) as any;
+  )) as unknown as [nextStartId: string, entries: StreamEntry[], deletedIds: string[]] | null;
 
   // resp = [nextStartId, entries, deletedIds]
   if (!resp || !resp[1] || resp[1].length === 0) return [];
 
   return resp[1].map(parseEntry);
 }
+
+type XReadGroupResponse = [stream: string, entries: StreamEntry[]][];
 
 export async function readOneNew(consumer: string, blockMs: number) {
   const r = redis();
@@ -95,11 +116,12 @@ export async function readOneNew(consumer: string, blockMs: number) {
     'STREAMS',
     STREAM_KEY,
     '>',
-  )) as any;
+  )) as unknown as XReadGroupResponse | null;
 
   if (!resp) return null;
 
-  const [[, entries]] = resp;
+  const first = resp[0];
+  const entries = first?.[1];
   if (!entries?.length) return null;
 
   return parseEntry(entries[0]);
