@@ -1,5 +1,9 @@
 # x-tweet-tracker-forwarder
 
+<p align="center">
+  <img src="./assets/voyager-forwarder-banner.svg" alt="Voyager Forwarder" width="1200" />
+</p>
+
 Cron-style forwarder that:
 1) reads events from **Redis Streams** (`voyager:tweets`)
 2) sends posts to a Telegram group using **Voyager Bot token**
