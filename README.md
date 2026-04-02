@@ -19,10 +19,20 @@ Behavior:
 - `TELEGRAM_CHAT_ID` — target group chat id (e.g. `-100...`)
 
 OpenRouter (optional):
+
+Text rewrite:
 - `OPENROUTER_API_KEY`
 - `OPENROUTER_MODEL`
 
-If `OPENROUTER_*` vars are set, the forwarder rewrites tweet text into a detailed Russian Telegram post (no hashtags) before publishing.
+If `OPENROUTER_API_KEY` + `OPENROUTER_MODEL` are set, the forwarder rewrites tweet text into a detailed Russian Telegram post (no hashtags) before publishing.
+
+Image generation:
+- `OPENROUTER_API_KEY`
+- `OPENROUTER_IMAGE_MODEL` (e.g. `google/gemini-2.5-flash-image`)
+
+If `OPENROUTER_API_KEY` + `OPENROUTER_IMAGE_MODEL` are set, the forwarder generates a square image for the final Telegram post text and publishes it as a photo with caption.
+
+If image generation fails, it falls back to posting text-only.
 
 ## Rate limit
 - Sends **one message every 30 seconds** (hardcoded).
