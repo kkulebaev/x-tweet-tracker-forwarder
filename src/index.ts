@@ -1,7 +1,8 @@
 import 'dotenv/config';
-import { Bot } from 'grammy';
+import { Bot, InputFile } from 'grammy';
 import { mustEnv } from './env.js';
 import { generateTelegramPost, openRouterEnabled } from './openrouter.js';
+import { generateTelegramPostImage, openRouterImageEnabled } from './openrouter-image.js';
 import { ack, autoClaimPending, closeRedis, ensureGroup, readOneNew } from './redis.js';
 
 const MENTION = '@assistant_open_claw_bot';
@@ -31,6 +32,7 @@ async function main() {
     chatId,
     delaySeconds: delayMs / 1000,
     openRouterEnabled: openRouterEnabled(),
+    openRouterImageEnabled: openRouterImageEnabled(),
   });
 
   await ensureGroup();
@@ -91,10 +93,28 @@ async function main() {
         }
       }
 
-      await bot.api.sendMessage(chatId, msg, {
-        parse_mode: 'Markdown',
-        link_preview_options: { is_disabled: true },
-      });
+      if (openRouterImageEnabled()) {
+        try {
+          const image = await generateTelegramPostImage({ telegramPostText: msg });
+
+          await bot.api.sendPhoto(chatId, new InputFile(image, 'post.png'), {
+            caption: msg,
+            parse_mode: 'Markdown',
+          });
+        } catch (e) {
+          console.warn('openrouter image generate failed, posting without image', errorMessage(e));
+
+          await bot.api.sendMessage(chatId, msg, {
+            parse_mode: 'Markdown',
+            link_preview_options: { is_disabled: true },
+          });
+        }
+      } else {
+        await bot.api.sendMessage(chatId, msg, {
+          parse_mode: 'Markdown',
+          link_preview_options: { is_disabled: true },
+        });
+      }
 
       await ack(item.id);
       sent += 1;
