@@ -147,8 +147,17 @@ async function main() {
 
     const card = await page.waitForSelector(cardSelector, { timeout: 5_000 });
 
-    // Give the avatar a moment to load before screenshot.
-    await page.waitForTimeout(500);
+    // Wait for avatar image to be loaded inside the card (best effort).
+    await page.waitForFunction(
+      (sel) => {
+        const root = document.querySelector(sel);
+        const img = root?.querySelector('img');
+        if (!img) return true;
+        return img.complete && img.naturalWidth > 0;
+      },
+      cardSelector,
+      { timeout: 10_000 },
+    );
 
     const image = await card.screenshot({ type: 'png' });
     await writeFile(outPath, image);
