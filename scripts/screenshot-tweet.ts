@@ -27,12 +27,15 @@ async function main() {
   const outPath = path.join(screenshotsDir, `${statusId}.png`);
 
   const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage({
+  const context = await browser.newContext({
     viewport: { width: 1280, height: 720 },
     deviceScaleFactor: 2,
+    colorScheme: 'dark',
     userAgent:
       'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123 Safari/537.36',
   });
+
+  const page = await context.newPage();
 
   try {
     await page.goto(url, { waitUntil: 'domcontentloaded' });
