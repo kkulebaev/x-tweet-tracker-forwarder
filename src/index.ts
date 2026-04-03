@@ -31,8 +31,10 @@ async function main() {
   console.log('forwarder start', {
     chatId,
     delaySeconds: delayMs / 1000,
-    openRouterEnabled: openRouterEnabled(),
+    openRouterTextEnabled: openRouterEnabled(),
+    openRouterTextModel: (process.env.OPENROUTER_TEXT_MODEL ?? '').trim() || null,
     openRouterImageEnabled: openRouterImageEnabled(),
+    openRouterImageModel: (process.env.OPENROUTER_IMAGE_MODEL ?? '').trim() || null,
   });
 
   await ensureGroup();
