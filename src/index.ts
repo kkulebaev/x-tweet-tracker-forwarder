@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { Bot, InputFile } from 'grammy';
 import { mustEnv } from './env.js';
-import { generateTelegramPost, openRouterEnabled } from './openrouter.js';
+import { generateTelegramPost, openRouterEnabled } from './openrouter-text.js';
 import { generateTelegramPostImage, openRouterImageEnabled } from './openrouter-image.js';
 import { ack, autoClaimPending, closeRedis, ensureGroup, readOneNew } from './redis.js';
 
