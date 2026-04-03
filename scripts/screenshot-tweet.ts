@@ -71,10 +71,24 @@ async function main() {
 
     await tweet.scrollIntoViewIfNeeded();
 
+    // Wait until avatar <img> is actually present and has src.
+    try {
+      await page.waitForSelector(`${selector} [data-testid="Tweet-User-Avatar"] img[src]`, {
+        timeout: 20_000,
+      });
+    } catch {
+      console.warn('avatar img not found in time');
+    }
+
     const avatarUrl = await tweet.evaluate((node) => {
       const img = node.querySelector('[data-testid="Tweet-User-Avatar"] img');
-      return img?.getAttribute('src') ?? null;
+      if (!img) return null;
+      return img.getAttribute('src') || (img as HTMLImageElement).src || null;
     });
+
+    if (!avatarUrl) {
+      console.warn('avatar url is empty');
+    }
 
     let avatarDataUrl: string | null = null;
 
