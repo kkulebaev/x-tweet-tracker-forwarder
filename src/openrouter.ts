@@ -7,7 +7,7 @@ function env(key: string) {
 }
 
 export function openRouterEnabled() {
-  return Boolean(env('OPENROUTER_API_KEY') && env('OPENROUTER_MODEL'));
+  return Boolean(env('OPENROUTER_API_KEY') && env('OPENROUTER_TEXT_MODEL'));
 }
 
 let client: OpenRouter | null = null;
@@ -27,9 +27,9 @@ export async function generateTelegramPost(args: {
   text: string;
 }) {
   const apiKey = env('OPENROUTER_API_KEY');
-  const model = env('OPENROUTER_MODEL');
+  const model = env('OPENROUTER_TEXT_MODEL');
   if (!apiKey) throw new Error('OPENROUTER_API_KEY is required');
-  if (!model) throw new Error('OPENROUTER_MODEL is required');
+  if (!model) throw new Error('OPENROUTER_TEXT_MODEL is required');
 
   const system = `Ты — редактор Telegram‑канала про фронтенд‑разработку. Преврати твит другого автора в готовый пост для публикации.
 

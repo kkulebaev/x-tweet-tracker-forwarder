@@ -22,9 +22,9 @@ OpenRouter (optional):
 
 Text rewrite:
 - `OPENROUTER_API_KEY`
-- `OPENROUTER_MODEL`
+- `OPENROUTER_TEXT_MODEL`
 
-If `OPENROUTER_API_KEY` + `OPENROUTER_MODEL` are set, the forwarder rewrites tweet text into a detailed Russian Telegram post (no hashtags) before publishing.
+If `OPENROUTER_API_KEY` + `OPENROUTER_TEXT_MODEL` are set, the forwarder rewrites tweet text into a detailed Russian Telegram post (no hashtags) before publishing.
 
 Image generation:
 - `OPENROUTER_API_KEY`
