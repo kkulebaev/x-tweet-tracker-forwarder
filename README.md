@@ -41,3 +41,9 @@ npm ci
 npm run build
 npm start
 ```
+
+## Screenshot tweet
+```bash
+npm run screenshot -- "https://x.com/<user>/status/<id>"
+# saved screenshot: screenshots/<id>.png
+```
