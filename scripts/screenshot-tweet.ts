@@ -48,6 +48,7 @@ async function main() {
     // Hide engagement buttons/metrics (replies / reposts / likes / share / bookmarks)
     await page.addStyleTag({
       content: `
+        /* Engagement buttons/metrics (replies / reposts / likes / share / bookmarks) */
         [data-testid="reply"],
         [data-testid="retweet"],
         [data-testid="like"],
@@ -64,8 +65,28 @@ async function main() {
           display: none !important;
           visibility: hidden !important;
         }
+
+        /* Date/time + views/analytics row */
+        a[href$="/analytics"],
+        a[href$="/analytics"] *,
+        time,
+        a:has(time),
+        a[href*="/status/"]:has(time) {
+          display: none !important;
+          visibility: hidden !important;
+        }
+
+        /* "Read X replies" and similar */
+        a[href$="/quotes"],
+        a[href$="/quotes"] *,
+        a[href*="/quotes"] {
+          display: none !important;
+          visibility: hidden !important;
+        }
       `,
     });
+
+    // Note: no DOM-pruning here; we rely on CSS hiding above.
 
     const image = await tweet.screenshot({ type: 'png' });
     await writeFile(outPath, image);
