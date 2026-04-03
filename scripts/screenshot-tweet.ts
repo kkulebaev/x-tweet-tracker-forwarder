@@ -85,10 +85,16 @@ async function main() {
       avatarClone.style.height = '48px';
       avatarClone.style.overflow = 'hidden';
       avatarClone.style.borderRadius = '999px';
+      avatarClone.style.flex = '0 0 48px';
+      avatarClone.style.background = 'rgba(255,255,255,0.08)';
       if (avatarImg) {
         (avatarImg as HTMLImageElement).style.width = '48px';
         (avatarImg as HTMLImageElement).style.height = '48px';
         (avatarImg as HTMLImageElement).style.objectFit = 'cover';
+        (avatarImg as HTMLImageElement).style.display = 'block';
+        (avatarImg as HTMLImageElement).loading = 'eager';
+        // Ensure the image is allowed to load from other origin.
+        (avatarImg as HTMLImageElement).crossOrigin = 'anonymous';
         (avatarImg as HTMLImageElement).removeAttribute('srcset');
       }
 
@@ -140,6 +146,10 @@ async function main() {
     });
 
     const card = await page.waitForSelector(cardSelector, { timeout: 5_000 });
+
+    // Give the avatar a moment to load before screenshot.
+    await page.waitForTimeout(500);
+
     const image = await card.screenshot({ type: 'png' });
     await writeFile(outPath, image);
 
