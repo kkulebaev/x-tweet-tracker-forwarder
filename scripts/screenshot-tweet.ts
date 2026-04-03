@@ -45,50 +45,102 @@ async function main() {
 
     await tweet.scrollIntoViewIfNeeded();
 
-    // Hide engagement buttons/metrics (replies / reposts / likes / share / bookmarks)
-    await page.addStyleTag({
-      content: `
-        /* Engagement buttons/metrics (replies / reposts / likes / share / bookmarks) */
-        [data-testid="reply"],
-        [data-testid="retweet"],
-        [data-testid="like"],
-        [data-testid="removeBookmark"],
-        [data-testid="bookmark"],
-        [data-testid="unbookmark"],
-        button[aria-label*="Поделиться"],
-        button[aria-label*="Share"],
-        div[role="group"][aria-label*="ответ"],
-        div[role="group"][aria-label*="Replies"],
-        div[role="group"][aria-label*="repost"],
-        div[role="group"][aria-label*="Retweet"],
-        div[role="group"][aria-label*="Like"] {
-          display: none !important;
-          visibility: hidden !important;
-        }
+    // Build a clean card: avatar + name + handle + tweet text only.
+    const cardSelector = await tweet.evaluate((node) => {
+      const avatar = node.querySelector('[data-testid="Tweet-User-Avatar"]');
+      const userName = node.querySelector('[data-testid="User-Name"]');
+      const tweetText = node.querySelector('[data-testid="tweetText"]');
 
-        /* Date/time + views/analytics row */
-        a[href$="/analytics"],
-        a[href$="/analytics"] *,
-        time,
-        a:has(time),
-        a[href*="/status/"]:has(time) {
-          display: none !important;
-          visibility: hidden !important;
-        }
+      if (!avatar || !userName || !tweetText) {
+        throw new Error('Cannot build tweet card: missing avatar/name/text');
+      }
 
-        /* "Read X replies" and similar */
-        a[href$="/quotes"],
-        a[href$="/quotes"] *,
-        a[href*="/quotes"] {
-          display: none !important;
-          visibility: hidden !important;
-        }
-      `,
+      const id = `tweet-card-${Math.random().toString(16).slice(2)}`;
+
+      // Minimal style: dark, rounded, padded.
+      const container = document.createElement('div');
+      container.id = id;
+      container.style.position = 'fixed';
+      container.style.left = '16px';
+      container.style.top = '16px';
+      container.style.zIndex = '2147483647';
+      container.style.background = 'rgb(0, 0, 0)';
+      container.style.border = '1px solid rgba(255,255,255,0.10)';
+      container.style.borderRadius = '16px';
+      container.style.padding = '16px';
+      container.style.maxWidth = '900px';
+      container.style.fontFamily = 'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif';
+
+      const header = document.createElement('div');
+      header.style.display = 'flex';
+      header.style.gap = '12px';
+      header.style.alignItems = 'flex-start';
+
+      const avatarClone = avatar.cloneNode(true) as HTMLElement;
+      // Avoid grabbing links/overlays: keep only the img.
+      const avatarImg = avatarClone.querySelector('img');
+      avatarClone.innerHTML = '';
+      if (avatarImg) avatarClone.append(avatarImg);
+      avatarClone.style.width = '48px';
+      avatarClone.style.height = '48px';
+      avatarClone.style.overflow = 'hidden';
+      avatarClone.style.borderRadius = '999px';
+      if (avatarImg) {
+        (avatarImg as HTMLImageElement).style.width = '48px';
+        (avatarImg as HTMLImageElement).style.height = '48px';
+        (avatarImg as HTMLImageElement).style.objectFit = 'cover';
+        (avatarImg as HTMLImageElement).removeAttribute('srcset');
+      }
+
+      const nameBlock = document.createElement('div');
+      nameBlock.style.display = 'flex';
+      nameBlock.style.flexDirection = 'column';
+      nameBlock.style.gap = '2px';
+
+      const nameClone = userName.cloneNode(true) as HTMLElement;
+      // Strip everything but plain text for name+handle
+      const texts = (nameClone.textContent ?? '').trim().split(/\n+/).map((s) => s.trim()).filter(Boolean);
+      const fullText = texts.join(' ');
+      const atMatch = fullText.match(/@\S+/);
+      const handle = atMatch ? atMatch[0] : '';
+      const displayName = handle ? fullText.replace(handle, '').trim() : fullText;
+
+      const nameEl = document.createElement('div');
+      nameEl.textContent = displayName;
+      nameEl.style.color = 'rgb(231, 233, 234)';
+      nameEl.style.fontSize = '18px';
+      nameEl.style.fontWeight = '700';
+      nameEl.style.lineHeight = '1.2';
+
+      const handleEl = document.createElement('div');
+      handleEl.textContent = handle;
+      handleEl.style.color = 'rgb(113, 118, 123)';
+      handleEl.style.fontSize = '16px';
+      handleEl.style.lineHeight = '1.2';
+
+      nameBlock.append(nameEl, handleEl);
+
+      header.append(avatarClone, nameBlock);
+
+      const textClone = tweetText.cloneNode(true) as HTMLElement;
+      const text = (textClone.textContent ?? '').trim();
+
+      const body = document.createElement('div');
+      body.textContent = text;
+      body.style.marginTop = '12px';
+      body.style.whiteSpace = 'pre-wrap';
+      body.style.color = 'rgb(231, 233, 234)';
+      body.style.fontSize = '18px';
+      body.style.lineHeight = '1.35';
+
+      container.append(header, body);
+      document.body.append(container);
+
+      return `#${id}`;
     });
 
-    // Note: no DOM-pruning here; we rely on CSS hiding above.
-
-    const image = await tweet.screenshot({ type: 'png' });
+    const card = await page.waitForSelector(cardSelector, { timeout: 5_000 });
+    const image = await card.screenshot({ type: 'png' });
     await writeFile(outPath, image);
 
     console.log(`saved screenshot: ${path.relative(process.cwd(), outPath)}`);
