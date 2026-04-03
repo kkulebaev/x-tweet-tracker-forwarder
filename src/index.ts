@@ -21,6 +21,12 @@ function formatMessage(args: { xUsername?: string | null; url: string; text: str
   return `${header}\n${args.url}\n\n${args.text}`.trim();
 }
 
+const TELEGRAM_PHOTO_CAPTION_MAX = 1024;
+
+function canSendAsPhotoCaption(text: string) {
+  return text.trim().length <= TELEGRAM_PHOTO_CAPTION_MAX;
+}
+
 async function main() {
   const bot = new Bot(mustEnv('TELEGRAM_BOT_TOKEN'));
   const chatId = Number(mustEnv('TELEGRAM_CHAT_ID'));
@@ -95,7 +101,7 @@ async function main() {
         }
       }
 
-      if (openRouterImageEnabled()) {
+      if (openRouterImageEnabled() && canSendAsPhotoCaption(msg)) {
         try {
           const image = await generateTelegramPostImage({ telegramPostText: msg });
 
@@ -112,6 +118,13 @@ async function main() {
           });
         }
       } else {
+        if (openRouterImageEnabled() && !canSendAsPhotoCaption(msg)) {
+          console.log('skip image: caption too long', {
+            captionLength: msg.trim().length,
+            maxCaptionLength: TELEGRAM_PHOTO_CAPTION_MAX,
+          });
+        }
+
         await bot.api.sendMessage(chatId, msg, {
           parse_mode: 'Markdown',
           link_preview_options: { is_disabled: true },
