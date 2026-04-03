@@ -45,6 +45,28 @@ async function main() {
 
     await tweet.scrollIntoViewIfNeeded();
 
+    // Hide engagement buttons/metrics (replies / reposts / likes / share / bookmarks)
+    await page.addStyleTag({
+      content: `
+        [data-testid="reply"],
+        [data-testid="retweet"],
+        [data-testid="like"],
+        [data-testid="removeBookmark"],
+        [data-testid="bookmark"],
+        [data-testid="unbookmark"],
+        button[aria-label*="Поделиться"],
+        button[aria-label*="Share"],
+        div[role="group"][aria-label*="ответ"],
+        div[role="group"][aria-label*="Replies"],
+        div[role="group"][aria-label*="repost"],
+        div[role="group"][aria-label*="Retweet"],
+        div[role="group"][aria-label*="Like"] {
+          display: none !important;
+          visibility: hidden !important;
+        }
+      `,
+    });
+
     const image = await tweet.screenshot({ type: 'png' });
     await writeFile(outPath, image);
 
