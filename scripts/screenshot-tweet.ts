@@ -3,12 +3,20 @@ import path from 'node:path';
 import process from 'node:process';
 import { chromium } from 'playwright';
 
+function getUserAgent() {
+  return 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123 Safari/537.36';
+}
+
+function toDataUrl(args: { contentType: string; data: Uint8Array }) {
+  const buf = Buffer.from(args.data);
+  return `data:${args.contentType};base64,${buf.toString('base64')}`;
+}
+
 async function fetchAsDataUrl(url: string) {
   const res = await fetch(url, {
     headers: {
       // X / pbs.twimg.com can be picky; mimic a browser a bit.
-      'user-agent':
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123 Safari/537.36',
+      'user-agent': getUserAgent(),
       referer: 'https://x.com/',
     },
   });
@@ -18,8 +26,8 @@ async function fetchAsDataUrl(url: string) {
   }
 
   const contentType = res.headers.get('content-type') ?? 'application/octet-stream';
-  const buf = Buffer.from(await res.arrayBuffer());
-  return `data:${contentType};base64,${buf.toString('base64')}`;
+  const data = new Uint8Array(await res.arrayBuffer());
+  return toDataUrl({ contentType, data });
 }
 
 function getStatusId(url: string) {
@@ -50,8 +58,7 @@ async function main() {
     viewport: { width: 1280, height: 720 },
     deviceScaleFactor: 2,
     colorScheme: 'dark',
-    userAgent:
-      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123 Safari/537.36',
+    userAgent: getUserAgent(),
   });
 
   const page = await context.newPage();
@@ -69,7 +76,44 @@ async function main() {
       return img?.getAttribute('src') ?? null;
     });
 
-    const avatarDataUrl = avatarUrl ? await fetchAsDataUrl(avatarUrl) : null;
+    let avatarDataUrl: string | null = null;
+
+    if (avatarUrl) {
+      try {
+        avatarDataUrl = await fetchAsDataUrl(avatarUrl);
+      } catch (e) {
+        console.warn('avatar fetch failed (node fetch), will try playwright request', {
+          url: avatarUrl,
+          error: e instanceof Error ? e.message : String(e),
+        });
+
+        try {
+          const res = await page.request.get(avatarUrl, {
+            headers: {
+              'user-agent': getUserAgent(),
+              referer: 'https://x.com/',
+            },
+          });
+
+          if (!res.ok()) {
+            console.warn('avatar fetch failed (playwright request)', {
+              url: avatarUrl,
+              status: res.status(),
+              statusText: res.statusText(),
+            });
+          } else {
+            const contentType = res.headers()['content-type'] ?? 'application/octet-stream';
+            const data = await res.body();
+            avatarDataUrl = toDataUrl({ contentType, data });
+          }
+        } catch (e2) {
+          console.warn('avatar fetch failed (playwright request exception)', {
+            url: avatarUrl,
+            error: e2 instanceof Error ? e2.message : String(e2),
+          });
+        }
+      }
+    }
 
     // Build a clean card: avatar + name + handle + tweet text only.
     const cardSelector = await tweet.evaluate(
@@ -108,7 +152,11 @@ async function main() {
       const avatarImg = avatarClone.querySelector('img');
       avatarClone.innerHTML = '';
       if (avatarImg) {
-        avatarImg.setAttribute('src', args.avatarDataUrl ?? avatarImg.getAttribute('src') ?? '');
+        const currentSrc = avatarImg.getAttribute('src') ?? '';
+        const nextSrc = args.avatarDataUrl ?? currentSrc;
+        if (nextSrc) {
+          avatarImg.setAttribute('src', nextSrc);
+        }
         avatarImg.removeAttribute('srcset');
         avatarClone.append(avatarImg);
       }
