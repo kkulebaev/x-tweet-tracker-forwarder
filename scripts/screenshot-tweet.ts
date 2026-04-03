@@ -3,6 +3,25 @@ import path from 'node:path';
 import process from 'node:process';
 import { chromium } from 'playwright';
 
+async function fetchAsDataUrl(url: string) {
+  const res = await fetch(url, {
+    headers: {
+      // X / pbs.twimg.com can be picky; mimic a browser a bit.
+      'user-agent':
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123 Safari/537.36',
+      referer: 'https://x.com/',
+    },
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to fetch ${url}: ${res.status} ${res.statusText}`);
+  }
+
+  const contentType = res.headers.get('content-type') ?? 'application/octet-stream';
+  const buf = Buffer.from(await res.arrayBuffer());
+  return `data:${contentType};base64,${buf.toString('base64')}`;
+}
+
 function getStatusId(url: string) {
   const match = url.match(/\/status\/(\d+)/);
   if (!match) throw new Error(`Cannot parse status id from url: ${url}`);
@@ -45,15 +64,23 @@ async function main() {
 
     await tweet.scrollIntoViewIfNeeded();
 
-    // Build a clean card: avatar + name + handle + tweet text only.
-    const cardSelector = await tweet.evaluate((node) => {
-      const avatar = node.querySelector('[data-testid="Tweet-User-Avatar"]');
-      const userName = node.querySelector('[data-testid="User-Name"]');
-      const tweetText = node.querySelector('[data-testid="tweetText"]');
+    const avatarUrl = await tweet.evaluate((node) => {
+      const img = node.querySelector('[data-testid="Tweet-User-Avatar"] img');
+      return img?.getAttribute('src') ?? null;
+    });
 
-      if (!avatar || !userName || !tweetText) {
-        throw new Error('Cannot build tweet card: missing avatar/name/text');
-      }
+    const avatarDataUrl = avatarUrl ? await fetchAsDataUrl(avatarUrl) : null;
+
+    // Build a clean card: avatar + name + handle + tweet text only.
+    const cardSelector = await tweet.evaluate(
+      (node, args) => {
+        const avatar = node.querySelector('[data-testid="Tweet-User-Avatar"]');
+        const userName = node.querySelector('[data-testid="User-Name"]');
+        const tweetText = node.querySelector('[data-testid="tweetText"]');
+
+        if (!avatar || !userName || !tweetText) {
+          throw new Error('Cannot build tweet card: missing avatar/name/text');
+        }
 
       const id = `tweet-card-${Math.random().toString(16).slice(2)}`;
 
@@ -80,7 +107,11 @@ async function main() {
       // Avoid grabbing links/overlays: keep only the img.
       const avatarImg = avatarClone.querySelector('img');
       avatarClone.innerHTML = '';
-      if (avatarImg) avatarClone.append(avatarImg);
+      if (avatarImg) {
+        avatarImg.setAttribute('src', args.avatarDataUrl ?? avatarImg.getAttribute('src') ?? '');
+        avatarImg.removeAttribute('srcset');
+        avatarClone.append(avatarImg);
+      }
       avatarClone.style.width = '48px';
       avatarClone.style.height = '48px';
       avatarClone.style.overflow = 'hidden';
@@ -92,10 +123,6 @@ async function main() {
         (avatarImg as HTMLImageElement).style.height = '48px';
         (avatarImg as HTMLImageElement).style.objectFit = 'cover';
         (avatarImg as HTMLImageElement).style.display = 'block';
-        (avatarImg as HTMLImageElement).loading = 'eager';
-        // Ensure the image is allowed to load from other origin.
-        (avatarImg as HTMLImageElement).crossOrigin = 'anonymous';
-        (avatarImg as HTMLImageElement).removeAttribute('srcset');
       }
 
       const nameBlock = document.createElement('div');
@@ -143,7 +170,9 @@ async function main() {
       document.body.append(container);
 
       return `#${id}`;
-    });
+      },
+      { avatarDataUrl },
+    );
 
     const card = await page.waitForSelector(cardSelector, { timeout: 5_000 });
 
