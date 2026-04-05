@@ -1,10 +1,6 @@
 import Redis from 'ioredis';
 import { mustEnv } from './env.js';
-
-function errorMessage(e: unknown) {
-  if (e instanceof Error) return e.message;
-  return String(e);
-}
+import { logger, serializeError } from './logger.js';
 
 export const STREAM_KEY = 'voyager:tweets';
 export const GROUP = 'forwarder';
@@ -16,8 +12,14 @@ export function redis() {
     client = new Redis(mustEnv('REDIS_URL'), {
       maxRetriesPerRequest: 2,
     });
-    client.on('error', (e) => {
-      console.warn('redis error', errorMessage(e));
+    client.on('error', (error) => {
+      logger.warn('redis_client_error', {
+        error: serializeError(error),
+      });
+    });
+    logger.info('redis_client_created', {
+      streamKey: STREAM_KEY,
+      group: GROUP,
     });
   }
   return client;
@@ -26,13 +28,26 @@ export function redis() {
 export async function ensureGroup() {
   const r = redis();
   try {
-    // Create consumer group at the end ($) so we only process new events.
     await r.xgroup('CREATE', STREAM_KEY, GROUP, '$', 'MKSTREAM');
-  } catch (e) {
-    const msg = errorMessage(e);
-    // BUSYGROUP Consumer Group name already exists
-    if (msg.includes('BUSYGROUP')) return;
-    throw e;
+    logger.info('redis_group_created', {
+      streamKey: STREAM_KEY,
+      group: GROUP,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes('BUSYGROUP')) {
+      logger.info('redis_group_exists', {
+        streamKey: STREAM_KEY,
+        group: GROUP,
+      });
+      return;
+    }
+    logger.error('redis_group_create_failed', {
+      streamKey: STREAM_KEY,
+      group: GROUP,
+      error: serializeError(error),
+    });
+    throw error;
   }
 }
 
@@ -87,6 +102,10 @@ function parseEntry(entry: StreamEntry) {
     payload = JSON.parse(payloadRaw);
   } catch {
     payload = { type: 'unknown', tweetId: obj.tweetId ?? '', url: '', text: payloadRaw, xUsername: null, createdAt: '' };
+    logger.warn('redis_payload_json_parse_failed', {
+      streamId: id,
+      tweetId: payload.tweetId,
+    });
   }
 
   return { id, payload };
@@ -94,8 +113,6 @@ function parseEntry(entry: StreamEntry) {
 
 export async function autoClaimPending(args: { consumer: string; minIdleMs: number; count?: number }) {
   const r = redis();
-  // XAUTOCLAIM key group consumer min-idle-time start [COUNT count]
-  // We start from 0-0 to claim the oldest pending.
   const count = Math.min(Math.max(args.count ?? 1, 1), 20);
 
   const resp: unknown = await r.call(
@@ -109,8 +126,18 @@ export async function autoClaimPending(args: { consumer: string; minIdleMs: numb
     String(count),
   );
 
-  if (!isAutoClaimResponse(resp)) return [];
+  if (!isAutoClaimResponse(resp)) {
+    logger.warn('redis_autoclaim_response_invalid', {
+      consumer: args.consumer,
+    });
+    return [];
+  }
   if (resp[1].length === 0) return [];
+
+  logger.info('redis_autoclaim_succeeded', {
+    consumer: args.consumer,
+    claimedCount: resp[1].length,
+  });
 
   return resp[1].map(parseEntry);
 }
@@ -132,10 +159,21 @@ export async function readOneNew(consumer: string, blockMs: number) {
     '>',
   );
 
-  if (!isXReadGroupResponse(resp)) return null;
+  if (!isXReadGroupResponse(resp)) {
+    logger.warn('redis_readgroup_response_invalid', {
+      consumer,
+      blockMs,
+    });
+    return null;
+  }
 
   const entries = resp[0]?.[1];
   if (!entries?.length) return null;
+
+  logger.info('redis_readgroup_succeeded', {
+    consumer,
+    entryCount: entries.length,
+  });
 
   return parseEntry(entries[0]);
 }
@@ -143,19 +181,28 @@ export async function readOneNew(consumer: string, blockMs: number) {
 export async function ack(id: string) {
   const r = redis();
   await r.xack(STREAM_KEY, GROUP, id);
+  logger.info('redis_xack_succeeded', {
+    streamId: id,
+  });
 }
 
 export async function closeRedis() {
   if (!client) return;
   try {
     await client.quit();
-  } catch {
-    // ignore
+    logger.info('redis_quit_succeeded');
+  } catch (error) {
+    logger.warn('redis_quit_failed', {
+      error: serializeError(error),
+    });
   } finally {
     try {
       client.disconnect();
-    } catch {
-      // ignore
+      logger.info('redis_disconnect_succeeded');
+    } catch (error) {
+      logger.warn('redis_disconnect_failed', {
+        error: serializeError(error),
+      });
     }
     client = null;
   }

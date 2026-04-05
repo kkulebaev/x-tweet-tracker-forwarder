@@ -1,4 +1,5 @@
 import { OpenRouter } from '@openrouter/sdk';
+import { logger } from './logger.js';
 import type { StructuredTelegramPost } from './post-contract.js';
 
 type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
@@ -75,8 +76,15 @@ export async function generateTelegramPostImage(args: { post: StructuredTelegram
   if (!model) throw new Error('OPENROUTER_IMAGE_MODEL is required');
 
   const prompt = buildImagePrompt({ post: args.post });
-
   const start = Date.now();
+
+  logger.info('openrouter_image_request_started', {
+    model,
+    titleLength: args.post.title.length,
+    leadLength: args.post.lead.length,
+    conceptLength: args.post.imageBrief.concept.length,
+    styleLength: args.post.imageBrief.style.length,
+  });
 
   const res = await openRouter().chat.send({
     chatGenerationParams: {
@@ -99,18 +107,29 @@ export async function generateTelegramPostImage(args: { post: StructuredTelegram
   const image = res.choices?.[0]?.message?.images?.[0];
   const dataUrl = image?.imageUrl?.url;
   if (!dataUrl || typeof dataUrl !== 'string') {
-    console.warn('openrouter image bad response', { ms, model });
+    logger.warn('openrouter_image_response_invalid', {
+      model,
+      durationMs: ms,
+    });
     throw new Error('OpenRouter response missing choices[0].message.images[0].image_url.url');
   }
 
   const b64 = getBase64FromDataUrl(dataUrl);
   if (!b64) {
+    logger.warn('openrouter_image_data_url_invalid', {
+      model,
+      durationMs: ms,
+    });
     throw new Error('OpenRouter image url is not a data URL');
   }
 
   const buf = Buffer.from(b64, 'base64');
 
-  console.log('openrouter image ok', { ms, model, bytes: buf.byteLength });
+  logger.info('openrouter_image_request_succeeded', {
+    model,
+    durationMs: ms,
+    bytes: buf.byteLength,
+  });
 
   return buf;
 }

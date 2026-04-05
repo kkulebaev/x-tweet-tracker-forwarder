@@ -1,4 +1,5 @@
 import { OpenRouter } from '@openrouter/sdk';
+import { logger, serializeError } from './logger.js';
 import { parseStructuredTelegramPost, type StructuredTelegramPost } from './post-contract.js';
 
 type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
@@ -67,13 +68,24 @@ function buildUserPrompt(args: { xUsername: string | null; url: string; text: st
   ].join('\n');
 }
 
-async function requestPostJson(messages: ChatMessage[], model: string) {
+async function requestPostJson(args: {
+  messages: ChatMessage[];
+  model: string;
+  attempt: number;
+  logContext: Record<string, unknown>;
+}) {
   const start = Date.now();
+
+  logger.info('openrouter_text_request_started', {
+    ...args.logContext,
+    model: args.model,
+    attempt: args.attempt,
+  });
 
   const res = await openRouter().chat.send({
     chatGenerationParams: {
-      model,
-      messages,
+      model: args.model,
+      messages: args.messages,
       temperature: 0.7,
       stream: false,
     },
@@ -83,11 +95,22 @@ async function requestPostJson(messages: ChatMessage[], model: string) {
 
   const content = res.choices?.[0]?.message?.content;
   if (!content || typeof content !== 'string') {
-    console.warn('openrouter bad response', { ms, model });
+    logger.warn('openrouter_text_response_invalid', {
+      ...args.logContext,
+      model: args.model,
+      attempt: args.attempt,
+      durationMs: ms,
+    });
     throw new Error('OpenRouter response missing choices[0].message.content');
   }
 
-  console.log('openrouter ok', { ms, model });
+  logger.info('openrouter_text_request_succeeded', {
+    ...args.logContext,
+    model: args.model,
+    attempt: args.attempt,
+    durationMs: ms,
+    contentLength: content.length,
+  });
 
   return content.trim();
 }
@@ -104,22 +127,34 @@ export async function generateStructuredTelegramPost(args: {
 
   const system = buildSystemPrompt();
   const user = buildUserPrompt(args);
+  const logContext = {
+    xUsername: args.xUsername,
+    url: args.url,
+  };
 
-  const firstAttempt = await requestPostJson(
-    [
+  const firstAttempt = await requestPostJson({
+    messages: [
       { role: 'system', content: system } satisfies ChatMessage,
       { role: 'user', content: user } satisfies ChatMessage,
     ],
     model,
-  );
+    attempt: 1,
+    logContext,
+  });
 
   const firstParsed = parseStructuredTelegramPost(firstAttempt);
   if (firstParsed.ok) {
+    logger.info('structured_post_validation_succeeded', {
+      ...logContext,
+      attempt: 1,
+      bulletsCount: firstParsed.value.bullets.length,
+    });
     return firstParsed.value;
   }
 
-  console.warn('openrouter invalid structured post, retrying', {
-    model,
+  logger.warn('structured_post_validation_failed', {
+    ...logContext,
+    attempt: 1,
     errors: firstParsed.errors,
   });
 
@@ -128,20 +163,38 @@ export async function generateStructuredTelegramPost(args: {
     `Ошибки валидации: ${firstParsed.errors.join('; ')}`,
   ].join('\n');
 
-  const secondAttempt = await requestPostJson(
-    [
+  const secondAttempt = await requestPostJson({
+    messages: [
       { role: 'system', content: system } satisfies ChatMessage,
       { role: 'user', content: user } satisfies ChatMessage,
       { role: 'assistant', content: firstAttempt } satisfies ChatMessage,
       { role: 'user', content: retryPrompt } satisfies ChatMessage,
     ],
     model,
-  );
+    attempt: 2,
+    logContext,
+  });
 
   const secondParsed = parseStructuredTelegramPost(secondAttempt);
   if (secondParsed.ok) {
+    logger.info('structured_post_validation_succeeded', {
+      ...logContext,
+      attempt: 2,
+      bulletsCount: secondParsed.value.bullets.length,
+    });
     return secondParsed.value;
   }
 
-  throw new Error(`OpenRouter returned invalid structured post: ${secondParsed.errors.join('; ')}`);
+  logger.error('structured_post_validation_failed', {
+    ...logContext,
+    attempt: 2,
+    errors: secondParsed.errors,
+  });
+
+  const error = new Error(`OpenRouter returned invalid structured post: ${secondParsed.errors.join('; ')}`);
+  logger.error('structured_post_generation_failed', {
+    ...logContext,
+    error: serializeError(error),
+  });
+  throw error;
 }
