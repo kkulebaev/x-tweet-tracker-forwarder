@@ -1,11 +1,15 @@
 import 'dotenv/config';
 import { Bot, InputFile } from 'grammy';
 import { mustEnv } from './env.js';
-import { generateTelegramPost, openRouterEnabled } from './openrouter-text.js';
+import { generateStructuredTelegramPost, openRouterEnabled } from './openrouter-text.js';
 import { generateTelegramPostImage, openRouterImageEnabled } from './openrouter-image.js';
+import {
+  buildFallbackStructuredPost,
+  canSendAsPhotoCaption,
+  renderTelegramCaption,
+  renderTelegramMessage,
+} from './telegram-render.js';
 import { ack, autoClaimPending, closeRedis, ensureGroup, readOneNew } from './redis.js';
-
-const MENTION = '@assistant_open_claw_bot';
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -16,22 +20,10 @@ function errorMessage(e: unknown) {
   return String(e);
 }
 
-function formatMessage(args: { xUsername?: string | null; url: string; text: string }) {
-  const header = `${MENTION} новый твит от @${args.xUsername ?? 'unknown'}`;
-  return `${header}\n${args.url}\n\n${args.text}`.trim();
-}
-
-const TELEGRAM_PHOTO_CAPTION_MAX = 1024;
-
-function canSendAsPhotoCaption(text: string) {
-  return text.trim().length <= TELEGRAM_PHOTO_CAPTION_MAX;
-}
-
 async function main() {
   const bot = new Bot(mustEnv('TELEGRAM_BOT_TOKEN'));
   const chatId = Number(mustEnv('TELEGRAM_CHAT_ID'));
 
-  // Fixed: one message every 30 seconds
   const delayMs = 30 * 1000;
 
   console.log('forwarder start', {
@@ -52,9 +44,7 @@ async function main() {
   const consumer = 'voyager-forwarder-1';
 
   try {
-    // Drain the queue until it becomes empty.
     while (true) {
-      // First: try to recover pending messages (if previous run crashed before XACK)
       const reclaimed = await autoClaimPending({ consumer, minIdleMs: 60_000, count: 1 });
       const item = reclaimed.length ? reclaimed[0] : await readOneNew(consumer, 1500);
 
@@ -83,50 +73,51 @@ async function main() {
         url: payload.url,
       });
 
-      let msg = formatMessage({
+      let post = buildFallbackStructuredPost({
         xUsername: payload.xUsername,
-        url: payload.url,
         text: payload.text,
       });
 
       if (openRouterEnabled()) {
         try {
-          msg = await generateTelegramPost({
+          post = await generateStructuredTelegramPost({
             xUsername: payload.xUsername,
             url: payload.url,
             text: payload.text,
           });
         } catch (e) {
-          console.warn('openrouter generate failed, using fallback message', errorMessage(e));
+          console.warn('openrouter generate failed, using fallback structured post', errorMessage(e));
         }
       }
 
-      if (openRouterImageEnabled() && canSendAsPhotoCaption(msg)) {
+      const caption = renderTelegramCaption({ post });
+      const message = renderTelegramMessage({ post, url: payload.url });
+
+      if (openRouterImageEnabled() && canSendAsPhotoCaption(caption)) {
         try {
-          const image = await generateTelegramPostImage({ telegramPostText: msg });
+          const image = await generateTelegramPostImage({ post });
 
           await bot.api.sendPhoto(chatId, new InputFile(image, 'post.png'), {
-            caption: msg,
-            parse_mode: 'Markdown',
+            caption,
+            parse_mode: 'HTML',
           });
         } catch (e) {
           console.warn('openrouter image generate failed, posting without image', errorMessage(e));
 
-          await bot.api.sendMessage(chatId, msg, {
-            parse_mode: 'Markdown',
+          await bot.api.sendMessage(chatId, message, {
+            parse_mode: 'HTML',
             link_preview_options: { is_disabled: true },
           });
         }
       } else {
-        if (openRouterImageEnabled() && !canSendAsPhotoCaption(msg)) {
+        if (openRouterImageEnabled() && !canSendAsPhotoCaption(caption)) {
           console.log('skip image: caption too long', {
-            captionLength: msg.trim().length,
-            maxCaptionLength: TELEGRAM_PHOTO_CAPTION_MAX,
+            captionLength: caption.trim().length,
           });
         }
 
-        await bot.api.sendMessage(chatId, msg, {
-          parse_mode: 'Markdown',
+        await bot.api.sendMessage(chatId, message, {
+          parse_mode: 'HTML',
           link_preview_options: { is_disabled: true },
         });
       }

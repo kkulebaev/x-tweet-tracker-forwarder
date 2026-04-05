@@ -1,4 +1,5 @@
 import { OpenRouter } from '@openrouter/sdk';
+import type { StructuredTelegramPost } from './post-contract.js';
 
 type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 
@@ -19,21 +20,40 @@ export function openRouterImageEnabled() {
   return Boolean(env('OPENROUTER_API_KEY') && env('OPENROUTER_IMAGE_MODEL'));
 }
 
-function buildImagePrompt(args: { telegramPostText: string }) {
-  // Per request: keep these in code, not in env.
+function buildImagePrompt(args: { post: StructuredTelegramPost }) {
   const OPENROUTER_IMAGE_PROMPT_SYSTEM = `You are an expert editorial illustrator for Telegram posts.
-Generate a single, high-quality image that matches the provided post text.
+Generate a single, high-quality image that matches the provided structured brief.
 
 Hard constraint:
-- Do NOT introduce any new entities, facts, locations, people, brands, numbers, or claims that are not explicitly present in the post text.
-- You may use only generic visual metaphors (light, abstract shapes, mood, composition) that do not add factual content.
+- Do NOT introduce any new entities, facts, locations, people, brands, numbers, or claims that are not explicitly present in the brief.
+- You may use only generic visual metaphors that do not add factual content.
 
 No text overlays, no captions, no watermarks, no logos.
 Avoid photorealistic faces; prefer stylized illustration or abstract concept art.`;
 
   const OPENROUTER_IMAGE_SIZE = '1024x1024';
 
-  const user = `POST TEXT (Russian):\n${args.telegramPostText}\n\nTASK:\nGenerate ONE image that visually represents the post text.\n\nREQUIREMENTS:\n- 1 image, square ${OPENROUTER_IMAGE_SIZE}.\n- The image must be grounded strictly in the post text. Do not add specific objects/actors unless they are explicitly mentioned.\n- Mood: modern, clean, slightly dramatic, high contrast.\n- Style: digital illustration / editorial art, sharp shapes, subtle gradients.\n- No readable text anywhere in the image (no UI labels, signs, letters, numbers).\n- No brand logos or trademarks.\n- If people are mentioned: depict as silhouettes or stylized figures only (no identifiable real persons).\n- If the post is about software/AI/tech: show only abstract or generic metaphors (streams, nodes, signals) unless specific items are named in the post.\n\nVALIDATION (must follow):\nIf you are about to add any concrete object/detail not explicitly present in the post text, replace it with an abstract shape/metaphor.\n\nOUTPUT:\nReturn only the final image. If you output any text, the result is invalid.`;
+  const user = [
+    `POST TITLE: ${args.post.title}`,
+    `POST LEAD: ${args.post.lead}`,
+    `IMAGE CONCEPT: ${args.post.imageBrief.concept}`,
+    `IMAGE STYLE: ${args.post.imageBrief.style}`,
+    '',
+    'TASK:',
+    'Generate ONE image that visually represents this structured brief.',
+    '',
+    'REQUIREMENTS:',
+    `- 1 image, square ${OPENROUTER_IMAGE_SIZE}.`,
+    '- Stay grounded in the brief only.',
+    '- Mood: modern, clean, slightly dramatic, high contrast.',
+    '- No readable text anywhere in the image.',
+    '- No brand logos or trademarks.',
+    '- If people are implied: depict as silhouettes or stylized figures only.',
+    '- Prefer editorial illustration / abstract concept art over literal screenshots.',
+    '',
+    'OUTPUT:',
+    'Return only the final image. If you output any text, the result is invalid.',
+  ].join('\n');
 
   return {
     system: OPENROUTER_IMAGE_PROMPT_SYSTEM,
@@ -48,17 +68,16 @@ function getBase64FromDataUrl(dataUrl: string) {
   return dataUrl.slice(idx + 1).trim();
 }
 
-export async function generateTelegramPostImage(args: { telegramPostText: string }) {
+export async function generateTelegramPostImage(args: { post: StructuredTelegramPost }) {
   const apiKey = env('OPENROUTER_API_KEY');
   const model = env('OPENROUTER_IMAGE_MODEL');
   if (!apiKey) throw new Error('OPENROUTER_API_KEY is required');
   if (!model) throw new Error('OPENROUTER_IMAGE_MODEL is required');
 
-  const prompt = buildImagePrompt({ telegramPostText: args.telegramPostText });
+  const prompt = buildImagePrompt({ post: args.post });
 
   const start = Date.now();
 
-  // OpenRouter SDK uses OpenAI-compatible params inside chatGenerationParams.
   const res = await openRouter().chat.send({
     chatGenerationParams: {
       model,
@@ -68,9 +87,7 @@ export async function generateTelegramPostImage(args: { telegramPostText: string
       ],
       temperature: 0.7,
       stream: false,
-      // OpenAI-compatible multimodal output.
       modalities: ['image'],
-      // Provider-specific image configuration.
       imageConfig: {
         size: prompt.size,
       },

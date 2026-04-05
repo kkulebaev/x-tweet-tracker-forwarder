@@ -1,4 +1,5 @@
 import { OpenRouter } from '@openrouter/sdk';
+import { parseStructuredTelegramPost, type StructuredTelegramPost } from './post-contract.js';
 
 type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 
@@ -21,83 +22,58 @@ function openRouter() {
   return client;
 }
 
-export async function generateTelegramPost(args: {
-  xUsername: string | null;
-  url: string;
-  text: string;
-}) {
-  const apiKey = env('OPENROUTER_API_KEY');
-  const model = env('OPENROUTER_TEXT_MODEL');
-  if (!apiKey) throw new Error('OPENROUTER_API_KEY is required');
-  if (!model) throw new Error('OPENROUTER_TEXT_MODEL is required');
+function buildSystemPrompt() {
+  return `Ты — редактор Telegram‑канала про фронтенд‑разработку. Преврати твит другого автора в структурированный JSON для Telegram‑поста.
 
-  const system = `Ты — редактор Telegram‑канала про фронтенд‑разработку. Преврати твит другого автора в готовый пост для публикации.
+Требования:
+- Язык: русский, разговорный тон, без канцелярита
+- Не используй Markdown, HTML или любую другую разметку внутри значений
+- Все строковые поля должны быть plain text only
+- Заголовок должен быть коротким, цепляющим и начинаться с заглавной буквы
+- titleEmoji обязателен: ровно один подходящий эмодзи для заголовка
+- lead: 1 короткий абзац, раскрывающий тезис твита
+- bullets: необязательный массив из 0-5 коротких пунктов
+- takeaway: короткий авторский вывод с практическим мнением фронтендера
+- question: один короткий вопрос в конце, заканчивается вопросительным знаком
+- imageBrief.concept: краткая визуальная идея для иллюстрации
+- imageBrief.style: краткое описание визуального стиля
+- Не добавляй выдуманные факты
+- Сохраняй смысл твита
+- Пытайся уложить полезный контент примерно в 850 символов
+- Верни только JSON, без пояснений и без code fences
 
-Стиль и формат:
-- Язык: русский, разговорный тон (как человек пишет в канал, без канцелярита).
+Строгая JSON-схема ответа:
+{
+  "titleEmoji": "🧠",
+  "title": "...",
+  "lead": "...",
+  "bullets": ["..."],
+  "takeaway": "...",
+  "question": "...",
+  "imageBrief": {
+    "concept": "...",
+    "style": "..."
+  }
+}`;
+}
 
-Ограничение длины (очень важно):
-- Итоговый пост должен быть НЕ ДЛИННЕЕ 1000 символов (с учётом пробелов, эмодзи, Markdown и возможной ссылки на твит).
-- Если не помещается — сжимай: убирай второстепенные детали, сокращай формулировки, уменьшай количество эмодзи, но сохраняй структуру (заголовок, основной текст, авторский абзац, финальный вопрос).
-- Верни результат в Telegram Markdown (parse_mode=Markdown):
-  - *жирный*, _курсив_, код в inline-блоке
-  - Никогда не используй **двойные** звёздочки для жирного ("**...**") — Telegram Markdown их не поддерживает.
-  - списки с дефисом
-  - без таблиц
-  - без сложных вложенных конструкций и без HTML
-- В начале ОБЯЗАТЕЛЬНО заголовок одной строкой.
-  - Заголовок начинается с ровно 1 эмодзи, затем пробел, затем жирный заголовок.
-    Пример: "🧠 *Почему это важно в React 19*"
-  - Текст заголовка всегда начинается с заглавной буквы (после эмодзи и пробела).
-  - Заголовок короткий и цепляющий, без капслока.
-- Далее основной текст:
-  - Раскрой мысль подробнее, чем в твите, но без воды.
-  - Можно добавлять микро‑контекст/пояснения, если это помогает фронтендеру понять смысл.
-  - Если уместно — используй список (2–5 пунктов) или мини‑структуру “что это значит / когда полезно / подводные камни”.
-- Эмодзи: можно и нужно для оформления. Используй заметно больше (примерно 8–14 на пост), но распределяй аккуратно и по смыслу, не ставь много подряд.
-- Не добавляй хэштеги.
-- Не добавляй призывы “подписывайтесь/лайк/репост”.
-- Не добавляй строку “Источник”, не добавляй ссылки отдельным блоком “source”.
-- Ссылку на твит можно вставить 1 раз внутри текста естественно (например “вот твит: …”), но только если она реально полезна; иначе не вставляй.
-
-Блок с авторским выводом (обязателен):
-- В конце поста добавь отдельный абзац с кратким авторским выводом (2–4 предложения).
-- Не отделяй этот абзац черточками/разделителями — пусть выглядит как обычный абзац.
-- Не обязательно подписывать его как «Моё мнение» — форма свободная.
-- В блоке дай практичное мнение автора канала (меня) как фронтендера:
-  - что в этом тезисе полезного
-  - где может быть подвох
-  - когда стоит применять / когда не стоит
-- Без агрессии и категоричности.
-
-Точность:
-- Сохраняй смысл твита, не искажай факты.
-- Не выдумывай детали. Если чего-то не хватает, формулируй как предположение (“возможно”, “скорее всего”) или опиши нейтрально.
-
-Финал:
-- В самом конце поста добавь один короткий вопрос к аудитории (1 предложение, заканчивается вопросительным знаком).
-
-Вывод:
-- Верни только готовый текст поста (заголовок + текст + авторский абзац + финальный вопрос), без комментариев, без JSON.`;
-
-  const user = [
+function buildUserPrompt(args: { xUsername: string | null; url: string; text: string }) {
+  return [
     `Tweet author: @${args.xUsername ?? 'unknown'}`,
     `Tweet url: ${args.url}`,
     '',
     'Tweet text:',
     args.text,
   ].join('\n');
+}
 
+async function requestPostJson(messages: ChatMessage[], model: string) {
   const start = Date.now();
 
-  // OpenRouter SDK uses OpenAI-compatible params inside chatGenerationParams.
   const res = await openRouter().chat.send({
     chatGenerationParams: {
       model,
-      messages: [
-        { role: 'system', content: system } satisfies ChatMessage,
-        { role: 'user', content: user } satisfies ChatMessage,
-      ],
+      messages,
       temperature: 0.7,
       stream: false,
     },
@@ -114,4 +90,58 @@ export async function generateTelegramPost(args: {
   console.log('openrouter ok', { ms, model });
 
   return content.trim();
+}
+
+export async function generateStructuredTelegramPost(args: {
+  xUsername: string | null;
+  url: string;
+  text: string;
+}): Promise<StructuredTelegramPost> {
+  const apiKey = env('OPENROUTER_API_KEY');
+  const model = env('OPENROUTER_TEXT_MODEL');
+  if (!apiKey) throw new Error('OPENROUTER_API_KEY is required');
+  if (!model) throw new Error('OPENROUTER_TEXT_MODEL is required');
+
+  const system = buildSystemPrompt();
+  const user = buildUserPrompt(args);
+
+  const firstAttempt = await requestPostJson(
+    [
+      { role: 'system', content: system } satisfies ChatMessage,
+      { role: 'user', content: user } satisfies ChatMessage,
+    ],
+    model,
+  );
+
+  const firstParsed = parseStructuredTelegramPost(firstAttempt);
+  if (firstParsed.ok) {
+    return firstParsed.value;
+  }
+
+  console.warn('openrouter invalid structured post, retrying', {
+    model,
+    errors: firstParsed.errors,
+  });
+
+  const retryPrompt = [
+    'Ты вернул невалидный JSON. Исправь ответ и верни только валидный JSON без пояснений.',
+    `Ошибки валидации: ${firstParsed.errors.join('; ')}`,
+  ].join('\n');
+
+  const secondAttempt = await requestPostJson(
+    [
+      { role: 'system', content: system } satisfies ChatMessage,
+      { role: 'user', content: user } satisfies ChatMessage,
+      { role: 'assistant', content: firstAttempt } satisfies ChatMessage,
+      { role: 'user', content: retryPrompt } satisfies ChatMessage,
+    ],
+    model,
+  );
+
+  const secondParsed = parseStructuredTelegramPost(secondAttempt);
+  if (secondParsed.ok) {
+    return secondParsed.value;
+  }
+
+  throw new Error(`OpenRouter returned invalid structured post: ${secondParsed.errors.join('; ')}`);
 }
