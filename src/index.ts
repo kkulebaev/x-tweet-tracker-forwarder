@@ -3,12 +3,7 @@ import { Bot, InputFile } from 'grammy';
 import { mustEnv } from './env.js';
 import { generateStructuredTelegramPost, openRouterEnabled } from './openrouter-text.js';
 import { generateTelegramPostImage, openRouterImageEnabled } from './openrouter-image.js';
-import {
-  buildFallbackStructuredPost,
-  canSendAsPhotoCaption,
-  renderTelegramCaption,
-  renderTelegramMessage,
-} from './telegram-render.js';
+import { canSendAsPhotoCaption, renderTelegramCaption, renderTelegramMessage } from './telegram-render.js';
 import { ack, autoClaimPending, closeRedis, ensureGroup, readOneNew } from './redis.js';
 
 function sleep(ms: number) {
@@ -73,22 +68,15 @@ async function main() {
         url: payload.url,
       });
 
-      let post = buildFallbackStructuredPost({
+      if (!openRouterEnabled()) {
+        throw new Error('OPENROUTER text generation must be enabled');
+      }
+
+      const post = await generateStructuredTelegramPost({
         xUsername: payload.xUsername,
+        url: payload.url,
         text: payload.text,
       });
-
-      if (openRouterEnabled()) {
-        try {
-          post = await generateStructuredTelegramPost({
-            xUsername: payload.xUsername,
-            url: payload.url,
-            text: payload.text,
-          });
-        } catch (e) {
-          console.warn('openrouter generate failed, using fallback structured post', errorMessage(e));
-        }
-      }
 
       const caption = renderTelegramCaption({ post });
       const message = renderTelegramMessage({ post, url: payload.url });
