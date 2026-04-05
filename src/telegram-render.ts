@@ -3,6 +3,7 @@ import type { StructuredTelegramPost } from './post-contract.js';
 const TELEGRAM_PHOTO_CAPTION_MAX = 1024;
 const TELEGRAM_PHOTO_CAPTION_TARGET = 900;
 const TELEGRAM_MESSAGE_TARGET = 1400;
+const X_MENTION_RE = /(^|[^\w])@([A-Za-z0-9_]{1,15})\b/g;
 
 function escapeHtml(text: string) {
   return text
@@ -10,6 +11,15 @@ function escapeHtml(text: string) {
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;');
+}
+
+function renderInlineText(text: string) {
+  const escaped = escapeHtml(text);
+
+  return escaped.replace(X_MENTION_RE, (match, prefix: string, username: string) => {
+    const safePrefix = prefix ?? '';
+    return `${safePrefix}<a href="https://x.com/${username}">@${username}</a>`;
+  });
 }
 
 function shortenText(text: string, maxLength: number) {
@@ -52,7 +62,7 @@ function compactPost(post: StructuredTelegramPost): StructuredTelegramPost {
 function renderBullets(bullets: string[]) {
   if (bullets.length === 0) return '';
 
-  return bullets.map((item) => `• ${escapeHtml(item)}`).join('\n');
+  return bullets.map((item) => `• ${renderInlineText(item)}`).join('\n');
 }
 
 export function renderTelegramPost(args: {
@@ -61,8 +71,8 @@ export function renderTelegramPost(args: {
   url?: string;
 }) {
   const parts = [
-    `${escapeHtml(args.post.titleEmoji)} <b>${escapeHtml(args.post.title)}</b>`,
-    escapeHtml(args.post.lead),
+    `${escapeHtml(args.post.titleEmoji)} <b>${renderInlineText(args.post.title)}</b>`,
+    renderInlineText(args.post.lead),
   ];
 
   const bulletsBlock = renderBullets(args.post.bullets);
@@ -70,8 +80,8 @@ export function renderTelegramPost(args: {
     parts.push(bulletsBlock);
   }
 
-  parts.push(escapeHtml(args.post.takeaway));
-  parts.push(escapeHtml(args.post.question));
+  parts.push(renderInlineText(args.post.takeaway));
+  parts.push(renderInlineText(args.post.question));
 
   if (args.includeUrl && args.url) {
     parts.push(escapeHtml(args.url));
