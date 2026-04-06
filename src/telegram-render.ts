@@ -65,6 +65,10 @@ function renderBullets(bullets: string[]) {
   return bullets.map((item) => `• ${renderInlineText(item)}`).join('\n');
 }
 
+function renderQuestionBlock(question: string) {
+  return `<i>${renderInlineText(question)}</i>`;
+}
+
 export function renderTelegramPost(args: {
   post: StructuredTelegramPost;
   includeUrl: boolean;
@@ -81,7 +85,7 @@ export function renderTelegramPost(args: {
   }
 
   parts.push(renderInlineText(args.post.takeaway));
-  parts.push(renderInlineText(args.post.question));
+  parts.push(renderQuestionBlock(args.post.question));
 
   if (args.includeUrl && args.url) {
     parts.push(escapeHtml(args.url));
