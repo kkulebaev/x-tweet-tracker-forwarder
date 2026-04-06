@@ -42,3 +42,21 @@ npm run build
 npm start
 ```
 
+## Docker
+Build image:
+```bash
+docker build -t x-tweet-tracker-forwarder .
+```
+
+Run container:
+```bash
+docker run --rm \
+  -e REDIS_URL \
+  -e TELEGRAM_BOT_TOKEN \
+  -e TELEGRAM_CHAT_ID \
+  -e OPENROUTER_API_KEY \
+  -e OPENROUTER_TEXT_MODEL \
+  -e OPENROUTER_IMAGE_MODEL \
+  x-tweet-tracker-forwarder
+```
+
