@@ -37,10 +37,13 @@ If `OPENROUTER_API_KEY` + `OPENROUTER_IMAGE_MODEL` are set, the forwarder genera
 
 ## Run
 ```bash
+nvm use
 npm ci
 npm run build
 npm start
 ```
+
+Node version is pinned to `24.14.1` via `.nvmrc`, `package.json#engines`, and the Docker base image.
 
 ## Docker
 Build image:
