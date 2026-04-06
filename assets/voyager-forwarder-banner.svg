@@ -12,19 +12,20 @@
 
   <rect width="1200" height="300" rx="24" fill="url(#bg)"/>
 
-  <!-- Left: Redis Streams card -->
-  <rect x="84" y="78" width="260" height="144" rx="22" fill="#0F172A" stroke="#1F2937"/>
+  <rect x="86" y="74" width="260" height="150" rx="24" fill="#0F172A" stroke="#1F2937"/>
+  <rect x="114" y="102" width="204" height="20" rx="10" fill="#94A3B8" opacity="0.18"/>
+  <rect x="114" y="136" width="168" height="20" rx="10" fill="url(#accent)" opacity="0.95"/>
+  <rect x="114" y="170" width="190" height="20" rx="10" fill="#94A3B8" opacity="0.2"/>
+  <rect x="114" y="204" width="142" height="8" rx="4" fill="#475569" opacity="0.7"/>
 
-  <!-- Stream rows (aligned) -->
-  <rect x="120" y="112" width="188" height="18" rx="9" fill="#94A3B8" opacity="0.25"/>
-  <rect x="120" y="142" width="188" height="18" rx="9" fill="#94A3B8" opacity="0.25"/>
-  <rect x="120" y="172" width="188" height="18" rx="9" fill="#94A3B8" opacity="0.25"/>
+  <path d="M387 150C428 150 458 121 510 121H602" stroke="url(#accent)" stroke-width="6" stroke-linecap="round"/>
+  <circle cx="603" cy="121" r="8" fill="#22D3EE"/>
 
-  <!-- Highlighted message -->
-  <rect x="120" y="142" width="92" height="18" rx="9" fill="url(#accent)" opacity="0.9"/>
+  <rect x="640" y="78" width="420" height="146" rx="24" fill="#0F172A" stroke="#1F2937"/>
+  <text x="676" y="126" fill="#E5E7EB" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto" font-size="22" font-weight="700">Telegram post</text>
+  <text x="676" y="160" fill="#CBD5E1" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto" font-size="18">Cleaned up, expanded, and ready to publish</text>
+  <text x="676" y="194" fill="#94A3B8" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto" font-size="16">Optional AI rewrite • Optional image • Channel-ready output</text>
 
-  <!-- Title block -->
-  <text x="380" y="140" fill="#E5E7EB" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto" font-size="54" font-weight="800">Voyager Forwarder</text>
-  <text x="380" y="190" fill="#9CA3AF" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto" font-size="24">Cron consumer for Redis Streams</text>
-  <text x="380" y="236" fill="#6B7280" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas" font-size="18">XREADGROUP · XAUTOCLAIM · 30s rate limit</text>
+  <text x="380" y="112" fill="#E5E7EB" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto" font-size="54" font-weight="800">Voyager Forwarder</text>
+  <text x="380" y="196" fill="#9CA3AF" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto" font-size="26">From tweet events to polished Telegram posts</text>
 </svg>
