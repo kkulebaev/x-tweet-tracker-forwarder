@@ -72,13 +72,16 @@ async function main() {
       }
 
       logger.info('structured_post_generation_started', logContext);
-      const post = await generateStructuredTelegramPost({
+      const generated = await generateStructuredTelegramPost({
         xUsername: payload.xUsername,
         url: payload.url,
         text: payload.text,
       });
+      const post = generated.post;
       logger.info('structured_post_generation_succeeded', {
         ...logContext,
+        archetypeId: generated.archetypeId,
+        configVersion: generated.configVersion,
         bulletsCount: post.bullets.length,
         titleLength: post.title.length,
         leadLength: post.lead.length,

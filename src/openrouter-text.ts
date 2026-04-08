@@ -1,8 +1,23 @@
 import { OpenRouter } from '@openrouter/sdk';
+import { selectRandomArchetype } from './archetype-selector.js';
 import { logger, serializeError } from './logger.js';
 import { parseStructuredTelegramPost, type StructuredTelegramPost } from './post-contract.js';
+import { rewriteConfig, type ArchetypeId, type RewriteArchetype } from './rewrite-config.js';
+import { buildSystemPrompt } from './system-prompt.js';
 
 type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
+
+export type StructuredGenerationArgs = {
+  xUsername: string | null;
+  url: string;
+  text: string;
+};
+
+export type StructuredGenerationResult = {
+  post: StructuredTelegramPost;
+  archetypeId: ArchetypeId;
+  configVersion: string;
+};
 
 function env(key: string) {
   return (process.env[key] ?? '').trim();
@@ -23,43 +38,7 @@ function openRouter() {
   return client;
 }
 
-function buildSystemPrompt() {
-  return `Ты — редактор Telegram‑канала про фронтенд‑разработку. Преврати твит другого автора в структурированный JSON для Telegram‑поста.
-
-Требования:
-- Язык: русский, разговорный тон, без канцелярита
-- Не используй Markdown, HTML или любую другую разметку внутри значений
-- Все строковые поля должны быть plain text only
-- Если в тексте есть упоминание вида @username, оставляй его как plain text '@username', не разворачивай в URL и не меняй имя
-- Заголовок должен быть коротким, цепляющим и начинаться с заглавной буквы
-- titleEmoji обязателен: ровно один подходящий эмодзи для заголовка
-- lead: 1 короткий абзац, раскрывающий тезис твита
-- bullets: необязательный массив из 0-5 коротких пунктов
-- takeaway: короткий авторский вывод с практическим мнением фронтендера
-- question: один короткий вопрос в конце, заканчивается вопросительным знаком
-- imageBrief.concept: краткая визуальная идея для иллюстрации
-- imageBrief.style: краткое описание визуального стиля
-- Не добавляй выдуманные факты
-- Сохраняй смысл твита
-- Пытайся уложить полезный контент примерно в 850 символов
-- Верни только JSON, без пояснений и без code fences
-
-Строгая JSON-схема ответа:
-{
-  "titleEmoji": "🧠",
-  "title": "...",
-  "lead": "...",
-  "bullets": ["..."],
-  "takeaway": "...",
-  "question": "...",
-  "imageBrief": {
-    "concept": "...",
-    "style": "..."
-  }
-}`;
-}
-
-function buildUserPrompt(args: { xUsername: string | null; url: string; text: string }) {
+function buildUserPrompt(args: StructuredGenerationArgs) {
   return [
     `Tweet author: @${args.xUsername ?? 'unknown'}`,
     `Tweet url: ${args.url}`,
@@ -116,22 +95,31 @@ async function requestPostJson(args: {
   return content.trim();
 }
 
-export async function generateStructuredTelegramPost(args: {
-  xUsername: string | null;
-  url: string;
-  text: string;
-}): Promise<StructuredTelegramPost> {
+function buildLogContext(args: StructuredGenerationArgs, archetype: RewriteArchetype) {
+  return {
+    xUsername: args.xUsername,
+    url: args.url,
+    archetypeId: archetype.id,
+    archetypeLengthBand: archetype.lengthBand,
+    configVersion: rewriteConfig.configVersion,
+  };
+}
+
+async function generateStructuredTelegramPostWithArchetype(args: {
+  input: StructuredGenerationArgs;
+  archetype: RewriteArchetype;
+}): Promise<StructuredGenerationResult> {
   const apiKey = env('OPENROUTER_API_KEY');
   const model = env('OPENROUTER_TEXT_MODEL');
   if (!apiKey) throw new Error('OPENROUTER_API_KEY is required');
   if (!model) throw new Error('OPENROUTER_TEXT_MODEL is required');
 
-  const system = buildSystemPrompt();
-  const user = buildUserPrompt(args);
-  const logContext = {
-    xUsername: args.xUsername,
-    url: args.url,
-  };
+  const system = buildSystemPrompt({
+    config: rewriteConfig,
+    archetype: args.archetype,
+  });
+  const user = buildUserPrompt(args.input);
+  const logContext = buildLogContext(args.input, args.archetype);
 
   const firstAttempt = await requestPostJson({
     messages: [
@@ -150,7 +138,11 @@ export async function generateStructuredTelegramPost(args: {
       attempt: 1,
       bulletsCount: firstParsed.value.bullets.length,
     });
-    return firstParsed.value;
+    return {
+      post: firstParsed.value,
+      archetypeId: args.archetype.id,
+      configVersion: rewriteConfig.configVersion,
+    };
   }
 
   logger.warn('structured_post_validation_failed', {
@@ -183,7 +175,11 @@ export async function generateStructuredTelegramPost(args: {
       attempt: 2,
       bulletsCount: secondParsed.value.bullets.length,
     });
-    return secondParsed.value;
+    return {
+      post: secondParsed.value,
+      archetypeId: args.archetype.id,
+      configVersion: rewriteConfig.configVersion,
+    };
   }
 
   logger.error('structured_post_validation_failed', {
@@ -198,4 +194,28 @@ export async function generateStructuredTelegramPost(args: {
     error: serializeError(error),
   });
   throw error;
+}
+
+export async function generateStructuredTelegramPostForArchetype(args: StructuredGenerationArgs & { archetypeId: ArchetypeId }) {
+  const archetype = rewriteConfig.archetypes.find((candidate) => candidate.id === args.archetypeId);
+  if (!archetype) {
+    throw new Error(`Unknown rewrite archetype: ${args.archetypeId}`);
+  }
+
+  return generateStructuredTelegramPostWithArchetype({
+    input: {
+      xUsername: args.xUsername,
+      url: args.url,
+      text: args.text,
+    },
+    archetype,
+  });
+}
+
+export async function generateStructuredTelegramPost(args: StructuredGenerationArgs): Promise<StructuredGenerationResult> {
+  const archetype = selectRandomArchetype(rewriteConfig.archetypes);
+  return generateStructuredTelegramPostWithArchetype({
+    input: args,
+    archetype,
+  });
 }
