@@ -5,10 +5,21 @@ import { logger, serializeError } from './logger.js';
 import { generateStructuredTelegramPost, openRouterEnabled } from './openrouter-text.js';
 import { generateTelegramPostImage, openRouterImageEnabled } from './openrouter-image.js';
 import { canSendAsPhotoCaption, renderTelegramCaption, renderTelegramMessage } from './telegram-render.js';
-import { ack, autoClaimPending, closeRedis, ensureGroup, readOneNew } from './redis.js';
+import { ack, autoClaimPending, closeRedis, ensureGroup, readOneNew, type TweetEventMedia } from './redis.js';
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+function getSinglePhotoMedia(media: TweetEventMedia[] | undefined) {
+  if (!Array.isArray(media) || media.length !== 1) return null;
+
+  const single = media[0];
+  if (!single) return null;
+  if (single.type !== 'photo') return null;
+  if (!single.url.trim()) return null;
+
+  return single;
 }
 
 async function main() {
@@ -88,16 +99,34 @@ async function main() {
 
       const caption = renderTelegramCaption({ post });
       const message = renderTelegramMessage({ post, url: payload.url });
-      const usePhoto = openRouterImageEnabled() && canSendAsPhotoCaption(caption);
+      const singlePhoto = getSinglePhotoMedia(payload.media);
+      const canUsePhotoCaption = canSendAsPhotoCaption(caption);
+      const useSourcePhoto = Boolean(singlePhoto && canUsePhotoCaption);
+      const useGeneratedPhoto = !useSourcePhoto && openRouterImageEnabled() && canUsePhotoCaption;
 
       logger.info('telegram_render_completed', {
         ...logContext,
         captionLength: caption.length,
         messageLength: message.length,
-        usePhoto,
+        hasSingleSourcePhoto: Boolean(singlePhoto),
+        useSourcePhoto,
+        useGeneratedPhoto,
       });
 
-      if (openRouterImageEnabled() && usePhoto) {
+      if (useSourcePhoto && singlePhoto) {
+        logger.info('telegram_send_started', {
+          ...logContext,
+          mode: 'source_photo',
+        });
+        await bot.api.sendPhoto(chatId, singlePhoto.url, {
+          caption,
+          parse_mode: 'HTML',
+        });
+        logger.info('telegram_send_succeeded', {
+          ...logContext,
+          mode: 'source_photo',
+        });
+      } else if (useGeneratedPhoto) {
         try {
           logger.info('image_generation_started', logContext);
           const image = await generateTelegramPostImage({ post });
@@ -108,7 +137,7 @@ async function main() {
 
           logger.info('telegram_send_started', {
             ...logContext,
-            mode: 'photo',
+            mode: 'generated_photo',
           });
           await bot.api.sendPhoto(chatId, new InputFile(image, 'post.png'), {
             caption,
@@ -116,7 +145,7 @@ async function main() {
           });
           logger.info('telegram_send_succeeded', {
             ...logContext,
-            mode: 'photo',
+            mode: 'generated_photo',
           });
         } catch (error) {
           logger.warn('image_generation_failed', {
@@ -138,7 +167,12 @@ async function main() {
           });
         }
       } else {
-        if (openRouterImageEnabled() && !usePhoto) {
+        if (singlePhoto && !canUsePhotoCaption) {
+          logger.info('source_photo_skipped_caption_too_long', {
+            ...logContext,
+            captionLength: caption.length,
+          });
+        } else if (openRouterImageEnabled() && !canUsePhotoCaption) {
           logger.info('image_skipped_caption_too_long', {
             ...logContext,
             captionLength: caption.length,

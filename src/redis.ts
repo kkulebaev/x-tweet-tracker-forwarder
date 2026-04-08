@@ -51,6 +51,12 @@ export async function ensureGroup() {
   }
 }
 
+export type TweetEventMedia = {
+  url: string;
+  type: string;
+  position: number;
+};
+
 export type TweetEventPayload = {
   type: string;
   tweetId: string;
@@ -58,6 +64,7 @@ export type TweetEventPayload = {
   url: string;
   text: string;
   createdAt: string;
+  media?: TweetEventMedia[];
 };
 
 type StreamEntry = [id: string, kv: string[]];
