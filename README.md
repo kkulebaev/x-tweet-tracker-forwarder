@@ -19,7 +19,8 @@ A queue-draining forwarder that reads tweet events from Redis Streams, turns the
 - consumes events from the `voyager:tweets` Redis stream
 - uses a Redis consumer group named `forwarder`
 - rewrites incoming tweet text into a structured Russian Telegram post via OpenRouter text generation
-- optionally generates a matching image via OpenRouter and sends the post as a photo with caption
+- if the incoming tweet has exactly one source photo, sends that photo directly with the generated caption
+- otherwise optionally generates a matching image via OpenRouter and sends the post as a photo with caption
 - falls back to a plain text Telegram message when image generation fails or the caption would be too long
 - acknowledges processed stream entries after successful delivery
 - reclaims stuck pending entries with `XAUTOCLAIM`
@@ -31,10 +32,11 @@ A queue-draining forwarder that reads tweet events from Redis Streams, turns the
 2. Validate payload and require a tweet URL
 3. Generate a structured Telegram post
 4. Render Telegram HTML
-5. Try to generate an image if image mode is enabled and the caption fits Telegram limits
-6. Send to Telegram
-7. Acknowledge the Redis stream entry
-8. Wait 30 seconds before the next send
+5. If the tweet has exactly one source photo and the caption fits, send that source photo
+6. Otherwise try to generate an image if image mode is enabled and the caption fits Telegram limits
+7. Send to Telegram
+8. Acknowledge the Redis stream entry
+9. Wait 30 seconds before the next send
 
 ## Requirements
 
@@ -66,6 +68,7 @@ If `OPENROUTER_IMAGE_MODEL` is not set, the service sends text-only Telegram mes
 - pending messages are reclaimed after **60 seconds** of idle time
 - Telegram messages are rendered with HTML formatting
 - link previews are disabled for text messages
+- source photo sending is preferred when the tweet event includes exactly one photo
 - image sending is skipped when the rendered caption exceeds Telegram caption limits
 - malformed entries without a valid URL are acknowledged and skipped
 - if OpenRouter text generation is disabled, the process fails fast
