@@ -16,11 +16,14 @@ export type RhetoricalDevice =
   | 'punchline'
   | 'practical-takeaway';
 
+export type BodyBlockType = 'paragraph' | 'list' | 'storyBeat' | 'punchline' | 'takeaway';
+
 export type RewriteArchetype = {
   id: ArchetypeId;
   label: string;
   purpose: string;
   lengthBand: LengthBand;
+  allowedBlockTypes: BodyBlockType[];
   structuralContract: string[];
   allowedDevices: RhetoricalDevice[];
   disallowedDevices: RhetoricalDevice[];
@@ -34,7 +37,7 @@ export type RewriteConfig = {
 };
 
 export const rewriteConfig = {
-  configVersion: 'v1',
+  configVersion: 'v2',
   voiceRules: [
     'Язык: русский',
     'Тон: живой, разговорный, уверенный, без канцелярита',
@@ -55,11 +58,12 @@ export const rewriteConfig = {
     'Все строковые поля ответа должны быть plain text only',
     'Заголовок должен быть коротким, цепляющим и начинаться с заглавной буквы',
     'titleEmoji обязателен: ровно один подходящий эмодзи для заголовка',
-    'lead должен быть коротким и соответствовать выбранному архетипу',
-    'bullets может содержать от 0 до 5 коротких пунктов',
-    'takeaway должен быть коротким практическим выводом фронтендера',
-    'question должен быть одним коротким вопросом в конце и заканчиваться вопросительным знаком',
+    'bodyBlocks должны строго соответствовать выбранному архетипу и его allowedBlockTypes',
+    'bodyBlocks должен быть непустым массивом из 1-4 блоков',
+    'cta.text, если присутствует, должен быть одним коротким вопросом или мягким призывом к обсуждению',
     'imageBrief.concept и imageBrief.style обязательны и должны опираться только на содержание поста',
+    'sourceTweetId должен совпадать с идентификатором исходного твита из контекста',
+    'configVersion должен совпадать с версией rewrite-конфига из system prompt',
     'Старайся уложить полезный контент примерно в 850 символов',
     'Верни только JSON без пояснений и без code fences',
   ],
@@ -69,12 +73,12 @@ export const rewriteConfig = {
       label: 'Contrarian take',
       purpose: 'Подать мысль как сильный тезис с разворотом ожидания',
       lengthBand: 'medium',
+      allowedBlockTypes: ['paragraph', 'punchline', 'takeaway'],
       structuralContract: [
-        'Начни с плотного hook или тезиса, который ломает ожидание',
-        'lead должен содержать основной разворот мысли',
-        'bullets лучше не использовать или оставить пустым',
-        'takeaway должен заземлить тезис в практику фронтенд-разработки',
-        'question должен продолжать спор или приглашать к позиции',
+        'Первый body block должен быстро ломать ожидание или формулировать острый тезис',
+        'Допускается 1-2 paragraph или punchline блока до финального takeaway',
+        'Финальный takeaway должен заземлить тезис в практику фронтенд-разработки',
+        'CTA, если есть, должен продолжать спор или приглашать к позиции',
       ],
       allowedDevices: ['hook', 'contrast', 'question-ending', 'practical-takeaway', 'punchline'],
       disallowedDevices: ['list', 'story-beat'],
@@ -84,12 +88,12 @@ export const rewriteConfig = {
       label: 'Mini-list',
       purpose: 'Упаковать мысль в короткий список из нескольких пунктов',
       lengthBand: 'medium',
+      allowedBlockTypes: ['paragraph', 'list', 'takeaway'],
       structuralContract: [
-        'lead должен быстро назвать тему списка',
-        'bullets должен содержать 2-4 коротких пункта',
-        'Каждый bullet должен быть самостоятельным и лаконичным',
-        'takeaway должен собрать список в один практический вывод',
-        'question может спрашивать про похожий опыт или альтернативы',
+        'Начни с короткого paragraph блока, который называет тему списка',
+        'Должен быть ровно один list block с 2-4 короткими пунктами',
+        'Финальный takeaway должен собрать список в один практический вывод',
+        'CTA может спрашивать про похожий опыт или альтернативы',
       ],
       allowedDevices: ['hook', 'list', 'question-ending', 'practical-takeaway'],
       disallowedDevices: ['story-beat'],
@@ -99,25 +103,27 @@ export const rewriteConfig = {
       label: 'Problem to insight',
       purpose: 'Показать проблему, наблюдение и вывод',
       lengthBand: 'medium',
+      allowedBlockTypes: ['paragraph', 'takeaway', 'punchline'],
       structuralContract: [
-        'lead должен обозначить проблему или напряжение',
-        'bullets можно не использовать, либо использовать максимум 2 пункта для наблюдений',
-        'takeaway должен быть явным insight из проблемы',
-        'question должен открывать обсуждение решения или trade-off',
+        'Первый paragraph block должен обозначить проблему или напряжение',
+        'Следующий block должен раскрыть наблюдение или разворот мысли',
+        'Финальный takeaway должен быть явным insight из проблемы',
+        'CTA должен открывать обсуждение решения или trade-off',
       ],
       allowedDevices: ['hook', 'contrast', 'question-ending', 'practical-takeaway'],
-      disallowedDevices: ['story-beat'],
+      disallowedDevices: ['story-beat', 'list'],
     },
     {
       id: 'micro-story-takeaway',
       label: 'Micro-story to takeaway',
       purpose: 'Превратить мысль в короткий эпизод с выводом',
       lengthBand: 'long',
+      allowedBlockTypes: ['storyBeat', 'paragraph', 'takeaway'],
       structuralContract: [
-        'lead должен звучать как короткий эпизод, момент или наблюдаемая сцена',
-        'bullets не использовать, если это не критично для ясности',
-        'takeaway должен быть явным смыслом истории, а не повтором lead',
-        'question должен переводить историю в практическое обсуждение',
+        'Первый block должен быть storyBeat и звучать как короткий момент, эпизод или наблюдаемая сцена',
+        'Допускается еще один paragraph block для разворота мысли',
+        'Финальный takeaway должен быть явным смыслом истории, а не повтором эпизода',
+        'CTA должен переводить историю в практическое обсуждение',
       ],
       allowedDevices: ['hook', 'story-beat', 'question-ending', 'practical-takeaway'],
       disallowedDevices: ['list'],
@@ -127,11 +133,12 @@ export const rewriteConfig = {
       label: 'Plain punchline',
       purpose: 'Оставить одну компактную мысль без лишних секций и украшений',
       lengthBand: 'short',
+      allowedBlockTypes: ['paragraph', 'punchline', 'takeaway'],
       structuralContract: [
-        'lead должен быть коротким и бить прямо в основную мысль',
-        'bullets не использовать',
-        'takeaway должен быть сжатым и чуть более прикладным, чем lead',
-        'question должен быть простым и коротким',
+        'Используй 1-2 коротких body blocks максимум',
+        'Основная мысль должна прозвучать сразу и без раскачки',
+        'Если есть takeaway, он должен быть сжатым и чуть более прикладным, чем основной тезис',
+        'CTA должен быть очень коротким или отсутствовать',
       ],
       allowedDevices: ['hook', 'punchline', 'question-ending', 'practical-takeaway'],
       disallowedDevices: ['list', 'story-beat'],

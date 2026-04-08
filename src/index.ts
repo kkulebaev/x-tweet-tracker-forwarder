@@ -76,17 +76,16 @@ async function main() {
         xUsername: payload.xUsername,
         url: payload.url,
         text: payload.text,
+        sourceTweetId: payload.tweetId,
       });
       const post = generated.post;
       logger.info('structured_post_generation_succeeded', {
         ...logContext,
         archetypeId: generated.archetypeId,
         configVersion: generated.configVersion,
-        bulletsCount: post.bullets.length,
+        bodyBlocksCount: post.bodyBlocks.length,
+        hasCta: Boolean(post.cta),
         titleLength: post.title.length,
-        leadLength: post.lead.length,
-        takeawayLength: post.takeaway.length,
-        questionLength: post.question.length,
       });
 
       const caption = renderTelegramCaption({ post });

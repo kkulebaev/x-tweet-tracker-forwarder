@@ -11,6 +11,7 @@ export type StructuredGenerationArgs = {
   xUsername: string | null;
   url: string;
   text: string;
+  sourceTweetId?: string | null;
 };
 
 export type StructuredGenerationResult = {
@@ -21,6 +22,16 @@ export type StructuredGenerationResult = {
 
 function env(key: string) {
   return (process.env[key] ?? '').trim();
+}
+
+function resolveSourceTweetId(args: StructuredGenerationArgs) {
+  const explicit = args.sourceTweetId?.trim();
+  if (explicit) return explicit;
+
+  const match = args.url.match(/status\/(\d+)/);
+  if (match?.[1]) return match[1];
+
+  return args.url;
 }
 
 export function openRouterEnabled() {
@@ -42,6 +53,7 @@ function buildUserPrompt(args: StructuredGenerationArgs) {
   return [
     `Tweet author: @${args.xUsername ?? 'unknown'}`,
     `Tweet url: ${args.url}`,
+    `Source tweet id: ${resolveSourceTweetId(args)}`,
     '',
     'Tweet text:',
     args.text,
@@ -99,6 +111,7 @@ function buildLogContext(args: StructuredGenerationArgs, archetype: RewriteArche
   return {
     xUsername: args.xUsername,
     url: args.url,
+    sourceTweetId: resolveSourceTweetId(args),
     archetypeId: archetype.id,
     archetypeLengthBand: archetype.lengthBand,
     configVersion: rewriteConfig.configVersion,
@@ -114,6 +127,7 @@ async function generateStructuredTelegramPostWithArchetype(args: {
   if (!apiKey) throw new Error('OPENROUTER_API_KEY is required');
   if (!model) throw new Error('OPENROUTER_TEXT_MODEL is required');
 
+  const sourceTweetId = resolveSourceTweetId(args.input);
   const system = buildSystemPrompt({
     config: rewriteConfig,
     archetype: args.archetype,
@@ -131,12 +145,18 @@ async function generateStructuredTelegramPostWithArchetype(args: {
     logContext,
   });
 
-  const firstParsed = parseStructuredTelegramPost(firstAttempt);
+  const firstParsed = parseStructuredTelegramPost(firstAttempt, {
+    archetype: args.archetype.id,
+    configVersion: rewriteConfig.configVersion,
+    sourceTweetId,
+    allowedBlockTypes: args.archetype.allowedBlockTypes,
+  });
   if (firstParsed.ok) {
     logger.info('structured_post_validation_succeeded', {
       ...logContext,
       attempt: 1,
-      bulletsCount: firstParsed.value.bullets.length,
+      bodyBlocksCount: firstParsed.value.bodyBlocks.length,
+      hasCta: Boolean(firstParsed.value.cta),
     });
     return {
       post: firstParsed.value,
@@ -168,12 +188,18 @@ async function generateStructuredTelegramPostWithArchetype(args: {
     logContext,
   });
 
-  const secondParsed = parseStructuredTelegramPost(secondAttempt);
+  const secondParsed = parseStructuredTelegramPost(secondAttempt, {
+    archetype: args.archetype.id,
+    configVersion: rewriteConfig.configVersion,
+    sourceTweetId,
+    allowedBlockTypes: args.archetype.allowedBlockTypes,
+  });
   if (secondParsed.ok) {
     logger.info('structured_post_validation_succeeded', {
       ...logContext,
       attempt: 2,
-      bulletsCount: secondParsed.value.bullets.length,
+      bodyBlocksCount: secondParsed.value.bodyBlocks.length,
+      hasCta: Boolean(secondParsed.value.cta),
     });
     return {
       post: secondParsed.value,
@@ -207,6 +233,7 @@ export async function generateStructuredTelegramPostForArchetype(args: Structure
       xUsername: args.xUsername,
       url: args.url,
       text: args.text,
+      sourceTweetId: args.sourceTweetId,
     },
     archetype,
   });

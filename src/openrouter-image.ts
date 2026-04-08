@@ -1,6 +1,6 @@
 import { OpenRouter } from '@openrouter/sdk';
 import { logger } from './logger.js';
-import type { StructuredTelegramPost } from './post-contract.js';
+import type { PostBodyBlock, StructuredTelegramPost } from './post-contract.js';
 
 type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 
@@ -21,6 +21,14 @@ export function openRouterImageEnabled() {
   return Boolean(env('OPENROUTER_API_KEY') && env('OPENROUTER_IMAGE_MODEL'));
 }
 
+function describeBlock(block: PostBodyBlock) {
+  if (block.type === 'list') {
+    return `list: ${block.items.join('; ')}`;
+  }
+
+  return `${block.type}: ${block.text}`;
+}
+
 function buildImagePrompt(args: { post: StructuredTelegramPost }) {
   const OPENROUTER_IMAGE_PROMPT_SYSTEM = `You are an expert editorial illustrator for Telegram posts.
 Generate a single, high-quality image that matches the provided structured brief.
@@ -33,10 +41,14 @@ No text overlays, no captions, no watermarks, no logos.
 Avoid photorealistic faces; prefer stylized illustration or abstract concept art.`;
 
   const OPENROUTER_IMAGE_SIZE = '1024x1024';
+  const summarizedBlocks = args.post.bodyBlocks.map((block) => describeBlock(block)).join('\n');
 
   const user = [
+    `POST ARCHETYPE: ${args.post.archetype}`,
     `POST TITLE: ${args.post.title}`,
-    `POST LEAD: ${args.post.lead}`,
+    'POST BODY BLOCKS:',
+    summarizedBlocks,
+    `POST CTA: ${args.post.cta?.text ?? 'none'}`,
     `IMAGE CONCEPT: ${args.post.imageBrief.concept}`,
     `IMAGE STYLE: ${args.post.imageBrief.style}`,
     '',
@@ -69,6 +81,16 @@ function getBase64FromDataUrl(dataUrl: string) {
   return dataUrl.slice(idx + 1).trim();
 }
 
+function bodyBlocksTextLength(post: StructuredTelegramPost) {
+  return post.bodyBlocks.reduce((sum, block) => {
+    if (block.type === 'list') {
+      return sum + block.items.join(' ').length;
+    }
+
+    return sum + block.text.length;
+  }, 0);
+}
+
 export async function generateTelegramPostImage(args: { post: StructuredTelegramPost }) {
   const apiKey = env('OPENROUTER_API_KEY');
   const model = env('OPENROUTER_IMAGE_MODEL');
@@ -80,8 +102,10 @@ export async function generateTelegramPostImage(args: { post: StructuredTelegram
 
   logger.info('openrouter_image_request_started', {
     model,
+    archetype: args.post.archetype,
     titleLength: args.post.title.length,
-    leadLength: args.post.lead.length,
+    bodyBlocksCount: args.post.bodyBlocks.length,
+    bodyTextLength: bodyBlocksTextLength(args.post),
     conceptLength: args.post.imageBrief.concept.length,
     styleLength: args.post.imageBrief.style.length,
   });
