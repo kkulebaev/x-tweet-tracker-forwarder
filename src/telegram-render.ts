@@ -1,4 +1,4 @@
-import type { StructuredTelegramPost } from './post-contract.js';
+import type { ListBlock, PostBodyBlock, StructuredTelegramPost } from './post-contract.js';
 
 const TELEGRAM_PHOTO_CAPTION_MAX = 1024;
 const TELEGRAM_PHOTO_CAPTION_TARGET = 900;
@@ -29,27 +29,83 @@ function shortenText(text: string, maxLength: number) {
   return `${normalized.slice(0, Math.max(1, maxLength - 1)).trimEnd()}…`;
 }
 
+function shortenListBlock(block: ListBlock) {
+  if (block.items.length === 0) return block;
+  if (block.items.length === 1) {
+    return {
+      type: 'list',
+      items: [shortenText(block.items[0], Math.max(24, block.items[0].length - 20))],
+    } satisfies ListBlock;
+  }
+
+  return {
+    type: 'list',
+    items: block.items.slice(0, -1),
+  } satisfies ListBlock;
+}
+
+function shortenBodyBlock(block: PostBodyBlock): PostBodyBlock {
+  if (block.type === 'list') {
+    return shortenListBlock(block);
+  }
+
+  return {
+    ...block,
+    text: shortenText(block.text, Math.max(40, block.text.length - 40)),
+  };
+}
+
+function blockTextLength(block: PostBodyBlock) {
+  if (block.type === 'list') {
+    return block.items.join(' ').length;
+  }
+
+  return block.text.length;
+}
+
 function compactPost(post: StructuredTelegramPost): StructuredTelegramPost {
-  let next = { ...post, bullets: [...post.bullets] };
+  let next: StructuredTelegramPost = {
+    ...post,
+    bodyBlocks: post.bodyBlocks.map((block) => (block.type === 'list' ? { ...block, items: [...block.items] } : { ...block })),
+    cta: post.cta ? { ...post.cta } : null,
+  };
 
   while (renderTelegramPost({ post: next, includeUrl: false }).length > TELEGRAM_PHOTO_CAPTION_TARGET) {
-    if (next.bullets.length > 0) {
-      next = { ...next, bullets: next.bullets.slice(0, -1) };
+    const listIndex = next.bodyBlocks.findIndex((block) => block.type === 'list' && block.items.length > 1);
+    if (listIndex >= 0) {
+      next = {
+        ...next,
+        bodyBlocks: next.bodyBlocks.map((block, index) => (index === listIndex && block.type === 'list' ? shortenListBlock(block) : block)),
+      };
       continue;
     }
 
-    if (next.lead.length > 220) {
-      next = { ...next, lead: shortenText(next.lead, next.lead.length - 60) };
+    const longestBlockIndex = next.bodyBlocks.reduce((bestIndex, block, index, blocks) => {
+      if (bestIndex < 0) return index;
+      return blockTextLength(block) > blockTextLength(blocks[bestIndex]) ? index : bestIndex;
+    }, -1);
+
+    if (longestBlockIndex >= 0 && blockTextLength(next.bodyBlocks[longestBlockIndex]) > 70) {
+      next = {
+        ...next,
+        bodyBlocks: next.bodyBlocks.map((block, index) => (index === longestBlockIndex ? shortenBodyBlock(block) : block)),
+      };
       continue;
     }
 
-    if (next.takeaway.length > 180) {
-      next = { ...next, takeaway: shortenText(next.takeaway, next.takeaway.length - 50) };
+    if (next.cta && next.cta.text.length > 60) {
+      next = {
+        ...next,
+        cta: { text: shortenText(next.cta.text, next.cta.text.length - 20) },
+      };
       continue;
     }
 
-    if (next.question.length > 80) {
-      next = { ...next, question: shortenText(next.question, next.question.length - 20) };
+    if (next.bodyBlocks.length > 2) {
+      next = {
+        ...next,
+        bodyBlocks: next.bodyBlocks.slice(0, -1),
+      };
       continue;
     }
 
@@ -59,14 +115,36 @@ function compactPost(post: StructuredTelegramPost): StructuredTelegramPost {
   return next;
 }
 
-function renderBullets(bullets: string[]) {
-  if (bullets.length === 0) return '';
+function renderListBlock(block: ListBlock) {
+  return block.items.map((item) => `• ${renderInlineText(item)}`).join('\n');
+}
 
-  return bullets.map((item) => `• ${renderInlineText(item)}`).join('\n');
+function renderBodyBlock(block: PostBodyBlock) {
+  if (block.type === 'list') {
+    return renderListBlock(block);
+  }
+
+  if (block.type === 'storyBeat') {
+    return `<i>${renderInlineText(block.text)}</i>`;
+  }
+
+  if (block.type === 'punchline') {
+    return `<b>${renderInlineText(block.text)}</b>`;
+  }
+
+  if (block.type === 'takeaway') {
+    return `💡 ${renderInlineText(block.text)}`;
+  }
+
+  return renderInlineText(block.text);
 }
 
 function renderQuestionBlock(question: string) {
   return `<i>${renderInlineText(question)}</i>`;
+}
+
+function renderCta(text: string) {
+  return text.trim().endsWith('?') ? renderQuestionBlock(text) : renderInlineText(text);
 }
 
 export function renderTelegramPost(args: {
@@ -74,18 +152,13 @@ export function renderTelegramPost(args: {
   includeUrl: boolean;
   url?: string;
 }) {
-  const parts = [
-    `${escapeHtml(args.post.titleEmoji)} <b>${renderInlineText(args.post.title)}</b>`,
-    renderInlineText(args.post.lead),
-  ];
+  const parts = [`${escapeHtml(args.post.titleEmoji)} <b>${renderInlineText(args.post.title)}</b>`];
 
-  const bulletsBlock = renderBullets(args.post.bullets);
-  if (bulletsBlock) {
-    parts.push(bulletsBlock);
+  parts.push(...args.post.bodyBlocks.map((block) => renderBodyBlock(block)));
+
+  if (args.post.cta?.text) {
+    parts.push(renderCta(args.post.cta.text));
   }
-
-  parts.push(renderInlineText(args.post.takeaway));
-  parts.push(renderQuestionBlock(args.post.question));
 
   if (args.includeUrl && args.url) {
     parts.push(escapeHtml(args.url));
@@ -121,21 +194,34 @@ export function canSendAsPhotoCaption(text: string) {
 export function buildFallbackStructuredPost(args: {
   xUsername?: string | null;
   text: string;
+  sourceTweetId?: string;
+  configVersion?: string;
 }): StructuredTelegramPost {
   const username = args.xUsername ?? 'unknown';
   const cleanedText = args.text.replace(/\s+/g, ' ').trim();
-  const lead = shortenText(cleanedText, 280);
 
   return {
+    archetype: 'plain-punchline',
     titleEmoji: '🧠',
     title: `Что нового у @${username}`,
-    lead,
-    bullets: [],
-    takeaway: 'Здесь лучше смотреть на сам тезис и проверять, как он ложится на реальную фронтенд-практику.',
-    question: 'Что думаешь об этом подходе?',
+    bodyBlocks: [
+      {
+        type: 'paragraph',
+        text: shortenText(cleanedText, 280),
+      },
+      {
+        type: 'takeaway',
+        text: 'Здесь лучше смотреть на сам тезис и проверять, как он ложится на реальную фронтенд-практику.',
+      },
+    ],
+    cta: {
+      text: 'Что думаешь об этом подходе?',
+    },
     imageBrief: {
       concept: 'editorial illustration about a frontend development idea from a tweet',
       style: 'modern clean digital editorial illustration with subtle drama',
     },
+    sourceTweetId: args.sourceTweetId ?? 'unknown',
+    configVersion: args.configVersion ?? 'fallback-v1',
   };
 }
