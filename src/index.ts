@@ -83,18 +83,20 @@ async function main() {
       }
 
       logger.info('structured_post_generation_started', logContext);
-      const post = await generateStructuredTelegramPost({
+      const generated = await generateStructuredTelegramPost({
         xUsername: payload.xUsername,
         url: payload.url,
         text: payload.text,
+        sourceTweetId: payload.tweetId,
       });
+      const post = generated.post;
       logger.info('structured_post_generation_succeeded', {
         ...logContext,
-        bulletsCount: post.bullets.length,
+        archetypeId: generated.archetypeId,
+        configVersion: generated.configVersion,
+        bodyBlocksCount: post.bodyBlocks.length,
+        hasCta: Boolean(post.cta),
         titleLength: post.title.length,
-        leadLength: post.lead.length,
-        takeawayLength: post.takeaway.length,
-        questionLength: post.question.length,
       });
 
       const caption = renderTelegramCaption({ post });

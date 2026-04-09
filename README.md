@@ -60,6 +60,15 @@ A queue-draining forwarder that reads tweet events from Redis Streams, turns the
 
 - `OPENROUTER_IMAGE_MODEL` — image model used to generate a post illustration, for example `google/gemini-2.5-flash-image`
 
+The rewrite layer uses config-driven archetypes. On each production generation it preselects one archetype via pure random, injects that contract into the prompt, and logs both the chosen archetype and rewrite config version.
+
+Current archetypes:
+- `contrarian-take`
+- `mini-list`
+- `problem-insight`
+- `micro-story-takeaway`
+- `plain-punchline`
+
 If `OPENROUTER_IMAGE_MODEL` is not set, the service sends text-only Telegram messages.
 
 ## Behavior details
@@ -81,6 +90,22 @@ npm ci
 npm run typecheck
 npm run build
 npm start
+```
+
+## Dry-run compare-all
+Use the dedicated script to run the same source tweet through all configured archetypes for manual review.
+
+```bash
+npm run dry-run:archetypes -- \
+  --author kkulebaev \
+  --url https://x.com/example/status/123 \
+  --text "Your source tweet text here"
+```
+
+JSON output is also available:
+
+```bash
+npm run dry-run:archetypes -- --json --text-file ./tweet.txt
 ```
 
 ## Docker
