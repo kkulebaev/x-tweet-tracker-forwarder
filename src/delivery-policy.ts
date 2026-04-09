@@ -3,7 +3,6 @@ import type { StructuredTelegramPost } from './post-contract.js';
 import type { TweetEventMedia, TweetEventPayload } from './redis.js';
 
 const DELIVERY_TARGET_GENERATION_RATIO = 0.5;
-const DELIVERY_PREVIEW_SAFE_MODE = 'conservative';
 const DELIVERY_EXCLUDE_ANNOUNCEMENTS = true;
 
 const ANNOUNCEMENT_PATTERNS = [
@@ -20,8 +19,6 @@ const NEWS_PATTERNS = [
 
 const THREAD_PATTERNS = [/\b\d+\//, /(?:^|\n)\s*[-•]/, /\bthread\b/i];
 
-type PreviewSafeMode = typeof DELIVERY_PREVIEW_SAFE_MODE;
-
 export type RawTweetSignals = {
   hasSingleSourcePhoto: boolean;
   hasAnyMedia: boolean;
@@ -29,21 +26,19 @@ export type RawTweetSignals = {
   isAnnouncementLike: boolean;
   isNewsLike: boolean;
   isLinkPost: boolean;
-  isPreviewSafe: boolean;
   isThreadLike: boolean;
   textLength: number;
 };
 
 export type GenerationBucket = 'generation' | 'no_generation';
 
-export type DeliveryMode = 'source_photo' | 'generated_photo' | 'text_with_preview' | 'text';
+export type DeliveryMode = 'source_photo' | 'generated_photo' | 'text';
 
 export type DeliveryDecision = {
   mode: DeliveryMode;
   reasons: string[];
   isGenerationEligible: boolean;
   generationBucket: GenerationBucket | null;
-  previewSafe: boolean;
 };
 
 function normalizeUrl(url: string) {
@@ -85,22 +80,6 @@ function isShortFactualText(text: string) {
   return sentenceCount <= 2;
 }
 
-function isPreviewSafeConservative(args: {
-  hasAnyMedia: boolean;
-  hasExternalLink: boolean;
-  isThreadLike: boolean;
-  text: string;
-}) {
-  if (args.hasAnyMedia) return false;
-  if (args.hasExternalLink) return false;
-  if (args.isThreadLike) return false;
-
-  const cleaned = args.text.replace(/https?:\/\/\S+/gi, '').replace(/\s+/g, ' ').trim();
-  if (!cleaned) return false;
-
-  return cleaned.length <= 220;
-}
-
 export function classifyRawTweet(payload: TweetEventPayload): RawTweetSignals {
   const text = payload.text.trim();
   const threadLike = matchesAny(text, THREAD_PATTERNS);
@@ -110,16 +89,6 @@ export function classifyRawTweet(payload: TweetEventPayload): RawTweetSignals {
   const linkPost = externalLink;
   const anyMedia = hasAnyMedia(payload.media);
 
-  const previewSafe =
-    DELIVERY_PREVIEW_SAFE_MODE === 'conservative'
-      ? isPreviewSafeConservative({
-          hasAnyMedia: anyMedia,
-          hasExternalLink: externalLink,
-          isThreadLike: threadLike,
-          text,
-        })
-      : false;
-
   return {
     hasSingleSourcePhoto: hasSingleSourcePhoto(payload.media),
     hasAnyMedia: anyMedia,
@@ -127,7 +96,6 @@ export function classifyRawTweet(payload: TweetEventPayload): RawTweetSignals {
     isAnnouncementLike: announcementLike,
     isNewsLike: newsLike,
     isLinkPost: linkPost,
-    isPreviewSafe: previewSafe,
     isThreadLike: threadLike,
     textLength: text.length,
   };
@@ -182,7 +150,6 @@ export function decideDeliveryMode(args: {
       reasons,
       isGenerationEligible: eligibility.value,
       generationBucket,
-      previewSafe: args.rawSignals.isPreviewSafe,
     };
   }
 
@@ -209,7 +176,6 @@ export function decideDeliveryMode(args: {
       reasons,
       isGenerationEligible: eligibility.value,
       generationBucket,
-      previewSafe: args.rawSignals.isPreviewSafe,
     };
   }
 
@@ -217,23 +183,11 @@ export function decideDeliveryMode(args: {
     reasons.push('eligible_for_generation', 'no_generation_bucket_selected');
   }
 
-  if (args.rawSignals.isPreviewSafe) {
-    reasons.push('preview_safe');
-    return {
-      mode: 'text_with_preview',
-      reasons,
-      isGenerationEligible: eligibility.value,
-      generationBucket,
-      previewSafe: args.rawSignals.isPreviewSafe,
-    };
-  }
-
-  reasons.push('preview_not_safe');
+  reasons.push('text_delivery');
   return {
     mode: 'text',
     reasons,
     isGenerationEligible: eligibility.value,
     generationBucket,
-    previewSafe: args.rawSignals.isPreviewSafe,
   };
 }

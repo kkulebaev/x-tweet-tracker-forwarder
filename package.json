@@ -12,6 +12,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test tests/**/*.test.ts",
     "dry-run:archetypes": "tsx src/scripts/dry-run-archetypes.ts"
   },
   "dependencies": {

@@ -21,7 +21,7 @@ A queue-draining forwarder that reads tweet events from Redis Streams, turns the
 - rewrites incoming tweet text into a structured Russian Telegram post via OpenRouter text generation
 - if the incoming tweet has exactly one source photo, sends that photo directly with the generated caption
 - applies a built-in delivery policy that mixes generated images and non-generated delivery paths
-- uses conservative Telegram link previews for safe text-only cases, and plain text when preview is not considered safe
+- enables Telegram link previews for text-only deliveries only when the final outbound message contains exactly one content-level URL and it matches the source tweet URL
 - falls back to a text message if image generation fails or the caption would be too long
 - acknowledges processed stream entries after successful delivery
 - reclaims stuck pending entries with `XAUTOCLAIM`
@@ -36,9 +36,9 @@ A queue-draining forwarder that reads tweet events from Redis Streams, turns the
 5. If the tweet has exactly one source photo and the caption fits, send that source photo
 6. Otherwise run the built-in delivery policy:
    - announcement / news / link-style posts are excluded from image generation
-   - conservative preview-safe text posts may use Telegram link previews
    - all other eligible posts use a deterministic 50/50 split between generated image and non-generated delivery
-7. Send to Telegram
+7. For text-only deliveries, enable Telegram link preview only when the final outbound message has exactly one content-level URL and it canonically matches the source tweet URL
+8. Send to Telegram
 8. Acknowledge the Redis stream entry
 9. Wait 30 seconds before the next send
 
@@ -69,7 +69,7 @@ A queue-draining forwarder that reads tweet events from Redis Streams, turns the
 The delivery policy is currently configured in code, not via environment variables:
 
 - target image-generation ratio for eligible posts: **50%**
-- preview safety mode: **conservative**
+- link previews are decided from the final outbound text message, not from raw tweet heuristics
 - announcement / news / link-style posts are excluded from image generation
 
 The worker first classifies the raw tweet, then makes a final decision after the structured Telegram post and caption are rendered.
@@ -92,9 +92,9 @@ If `OPENROUTER_IMAGE_MODEL` is not set, the service sends text-only Telegram mes
 - Telegram messages are rendered with HTML formatting
 - source photo sending is preferred when the tweet event includes exactly one photo
 - image sending is skipped when the rendered caption exceeds Telegram caption limits
-- link previews are enabled only for conservative preview-safe cases
+- link previews are enabled only for text-only messages whose final outbound content contains exactly one canonical source-tweet URL
 - eligible non-photo posts are split deterministically between generated-image and non-generated paths
-- decision logs include `deliveryMode`, `decisionReasons`, `isGenerationEligible`, `generationBucket`, and `previewSafe`
+- decision logs include `deliveryMode`, `decisionReasons`, `isGenerationEligible`, `generationBucket`, `linkPreviewEnabled`, `linkPreviewReason`, and `contentUrlCount`
 - malformed entries without a valid URL are acknowledged and skipped
 - if OpenRouter text generation is disabled, the process fails fast
 
@@ -104,6 +104,7 @@ If `OPENROUTER_IMAGE_MODEL` is not set, the service sends text-only Telegram mes
 nvm use
 npm ci
 npm run typecheck
+npm test
 npm run build
 npm start
 ```

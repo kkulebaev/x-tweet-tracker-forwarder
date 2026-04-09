@@ -7,6 +7,7 @@ import { generateTelegramPostImage, openRouterImageEnabled } from './openrouter-
 import { canSendAsPhotoCaption, renderTelegramCaption, renderTelegramMessage } from './telegram-render.js';
 import { ack, autoClaimPending, closeRedis, ensureGroup, readOneNew, type TweetEventMedia } from './redis.js';
 import { classifyRawTweet, decideDeliveryMode } from './delivery-policy.js';
+import { shouldEnableLinkPreview } from './link-preview.js';
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -117,6 +118,11 @@ async function main() {
         imageGenerationEnabled: openRouterImageEnabled(),
         generationSeed: payload.tweetId || payload.url,
       });
+      const linkPreviewDecision = shouldEnableLinkPreview({
+        mode: deliveryDecision.mode,
+        message,
+        sourceTweetUrl: payload.url,
+      });
 
       logger.info('telegram_render_completed', {
         ...logContext,
@@ -127,7 +133,9 @@ async function main() {
         decisionReasons: deliveryDecision.reasons,
         isGenerationEligible: deliveryDecision.isGenerationEligible,
         generationBucket: deliveryDecision.generationBucket,
-        previewSafe: deliveryDecision.previewSafe,
+        linkPreviewEnabled: linkPreviewDecision.enabled,
+        linkPreviewReason: linkPreviewDecision.reason,
+        contentUrlCount: linkPreviewDecision.contentUrlCount,
         captionFitsPhotoLimit: canUsePhotoCaption,
       });
 
@@ -175,14 +183,22 @@ async function main() {
             error: serializeError(error),
           });
 
-          const fallbackMode = deliveryDecision.previewSafe ? 'text_with_preview_after_image_failure' : 'text_after_image_failure';
+          const fallbackPreviewDecision = shouldEnableLinkPreview({
+            mode: 'text',
+            message,
+            sourceTweetUrl: payload.url,
+          });
+          const fallbackMode = fallbackPreviewDecision.enabled ? 'text_with_preview_after_image_failure' : 'text_after_image_failure';
           logger.info('telegram_send_started', {
             ...logContext,
             mode: fallbackMode,
+            linkPreviewEnabled: fallbackPreviewDecision.enabled,
+            linkPreviewReason: fallbackPreviewDecision.reason,
+            contentUrlCount: fallbackPreviewDecision.contentUrlCount,
           });
           await bot.api.sendMessage(chatId, message, {
             parse_mode: 'HTML',
-            link_preview_options: deliveryDecision.previewSafe ? undefined : { is_disabled: true },
+            link_preview_options: fallbackPreviewDecision.enabled ? undefined : { is_disabled: true },
           });
           logger.info('telegram_send_succeeded', {
             ...logContext,
@@ -205,10 +221,13 @@ async function main() {
         logger.info('telegram_send_started', {
           ...logContext,
           mode: deliveryDecision.mode,
+          linkPreviewEnabled: linkPreviewDecision.enabled,
+          linkPreviewReason: linkPreviewDecision.reason,
+          contentUrlCount: linkPreviewDecision.contentUrlCount,
         });
         await bot.api.sendMessage(chatId, message, {
           parse_mode: 'HTML',
-          link_preview_options: deliveryDecision.mode === 'text_with_preview' ? undefined : { is_disabled: true },
+          link_preview_options: linkPreviewDecision.enabled ? undefined : { is_disabled: true },
         });
         logger.info('telegram_send_succeeded', {
           ...logContext,
