@@ -20,8 +20,9 @@ A queue-draining forwarder that reads tweet events from Redis Streams, turns the
 - uses a Redis consumer group named `forwarder`
 - rewrites incoming tweet text into a structured Russian Telegram post via OpenRouter text generation
 - if the incoming tweet has exactly one source photo, sends that photo directly with the generated caption
-- otherwise optionally generates a matching image via OpenRouter and sends the post as a photo with caption
-- falls back to a plain text Telegram message when image generation fails or the caption would be too long
+- applies a built-in delivery policy that mixes generated images and non-generated delivery paths
+- uses conservative Telegram link previews for safe text-only cases, and plain text when preview is not considered safe
+- falls back to a text message if image generation fails or the caption would be too long
 - acknowledges processed stream entries after successful delivery
 - reclaims stuck pending entries with `XAUTOCLAIM`
 - drains the queue and exits when no more messages are available
@@ -33,7 +34,10 @@ A queue-draining forwarder that reads tweet events from Redis Streams, turns the
 3. Generate a structured Telegram post
 4. Render Telegram HTML
 5. If the tweet has exactly one source photo and the caption fits, send that source photo
-6. Otherwise try to generate an image if image mode is enabled and the caption fits Telegram limits
+6. Otherwise run the built-in delivery policy:
+   - announcement / news / link-style posts are excluded from image generation
+   - conservative preview-safe text posts may use Telegram link previews
+   - all other eligible posts use a deterministic 50/50 split between generated image and non-generated delivery
 7. Send to Telegram
 8. Acknowledge the Redis stream entry
 9. Wait 30 seconds before the next send
@@ -60,6 +64,16 @@ A queue-draining forwarder that reads tweet events from Redis Streams, turns the
 
 - `OPENROUTER_IMAGE_MODEL` — image model used to generate a post illustration, for example `google/gemini-2.5-flash-image`
 
+### Built-in delivery policy
+
+The delivery policy is currently configured in code, not via environment variables:
+
+- target image-generation ratio for eligible posts: **50%**
+- preview safety mode: **conservative**
+- announcement / news / link-style posts are excluded from image generation
+
+The worker first classifies the raw tweet, then makes a final decision after the structured Telegram post and caption are rendered.
+
 The rewrite layer uses config-driven archetypes. On each production generation it preselects one archetype via pure random, injects that contract into the prompt, and logs both the chosen archetype and rewrite config version.
 
 Current archetypes:
@@ -76,9 +90,11 @@ If `OPENROUTER_IMAGE_MODEL` is not set, the service sends text-only Telegram mes
 - send rate is hardcoded to **1 message every 30 seconds**
 - pending messages are reclaimed after **60 seconds** of idle time
 - Telegram messages are rendered with HTML formatting
-- link previews are disabled for text messages
 - source photo sending is preferred when the tweet event includes exactly one photo
 - image sending is skipped when the rendered caption exceeds Telegram caption limits
+- link previews are enabled only for conservative preview-safe cases
+- eligible non-photo posts are split deterministically between generated-image and non-generated paths
+- decision logs include `deliveryMode`, `decisionReasons`, `isGenerationEligible`, `generationBucket`, and `previewSafe`
 - malformed entries without a valid URL are acknowledged and skipped
 - if OpenRouter text generation is disabled, the process fails fast
 

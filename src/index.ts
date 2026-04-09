@@ -6,6 +6,7 @@ import { generateStructuredTelegramPost, openRouterEnabled } from './openrouter-
 import { generateTelegramPostImage, openRouterImageEnabled } from './openrouter-image.js';
 import { canSendAsPhotoCaption, renderTelegramCaption, renderTelegramMessage } from './telegram-render.js';
 import { ack, autoClaimPending, closeRedis, ensureGroup, readOneNew, type TweetEventMedia } from './redis.js';
+import { classifyRawTweet, decideDeliveryMode } from './delivery-policy.js';
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -78,6 +79,12 @@ async function main() {
 
       logger.info('stream_item_received', logContext);
 
+      const rawSignals = classifyRawTweet(payload);
+      logger.info('delivery_policy_raw_signals', {
+        ...logContext,
+        ...rawSignals,
+      });
+
       if (!openRouterEnabled()) {
         throw new Error('OPENROUTER text generation must be enabled');
       }
@@ -103,19 +110,28 @@ async function main() {
       const message = renderTelegramMessage({ post, url: payload.url });
       const singlePhoto = getSinglePhotoMedia(payload.media);
       const canUsePhotoCaption = canSendAsPhotoCaption(caption);
-      const useSourcePhoto = Boolean(singlePhoto && canUsePhotoCaption);
-      const useGeneratedPhoto = !useSourcePhoto && openRouterImageEnabled() && canUsePhotoCaption;
+      const deliveryDecision = decideDeliveryMode({
+        rawSignals,
+        post,
+        canUsePhotoCaption,
+        imageGenerationEnabled: openRouterImageEnabled(),
+        generationSeed: payload.tweetId || payload.url,
+      });
 
       logger.info('telegram_render_completed', {
         ...logContext,
         captionLength: caption.length,
         messageLength: message.length,
         hasSingleSourcePhoto: Boolean(singlePhoto),
-        useSourcePhoto,
-        useGeneratedPhoto,
+        deliveryMode: deliveryDecision.mode,
+        decisionReasons: deliveryDecision.reasons,
+        isGenerationEligible: deliveryDecision.isGenerationEligible,
+        generationBucket: deliveryDecision.generationBucket,
+        previewSafe: deliveryDecision.previewSafe,
+        captionFitsPhotoLimit: canUsePhotoCaption,
       });
 
-      if (useSourcePhoto && singlePhoto) {
+      if (deliveryDecision.mode === 'source_photo' && singlePhoto) {
         logger.info('telegram_send_started', {
           ...logContext,
           mode: 'source_photo',
@@ -128,9 +144,13 @@ async function main() {
           ...logContext,
           mode: 'source_photo',
         });
-      } else if (useGeneratedPhoto) {
+      } else if (deliveryDecision.mode === 'generated_photo') {
         try {
-          logger.info('image_generation_started', logContext);
+          logger.info('image_generation_started', {
+            ...logContext,
+            generationBucket: deliveryDecision.generationBucket,
+            decisionReasons: deliveryDecision.reasons,
+          });
           const image = await generateTelegramPostImage({ post });
           logger.info('image_generation_succeeded', {
             ...logContext,
@@ -155,17 +175,18 @@ async function main() {
             error: serializeError(error),
           });
 
+          const fallbackMode = deliveryDecision.previewSafe ? 'text_with_preview_after_image_failure' : 'text_after_image_failure';
           logger.info('telegram_send_started', {
             ...logContext,
-            mode: 'text_after_image_failure',
+            mode: fallbackMode,
           });
           await bot.api.sendMessage(chatId, message, {
             parse_mode: 'HTML',
-            link_preview_options: { is_disabled: true },
+            link_preview_options: deliveryDecision.previewSafe ? undefined : { is_disabled: true },
           });
           logger.info('telegram_send_succeeded', {
             ...logContext,
-            mode: 'text_after_image_failure',
+            mode: fallbackMode,
           });
         }
       } else {
@@ -183,15 +204,15 @@ async function main() {
 
         logger.info('telegram_send_started', {
           ...logContext,
-          mode: 'text',
+          mode: deliveryDecision.mode,
         });
         await bot.api.sendMessage(chatId, message, {
           parse_mode: 'HTML',
-          link_preview_options: { is_disabled: true },
+          link_preview_options: deliveryDecision.mode === 'text_with_preview' ? undefined : { is_disabled: true },
         });
         logger.info('telegram_send_succeeded', {
           ...logContext,
-          mode: 'text',
+          mode: deliveryDecision.mode,
         });
       }
 
