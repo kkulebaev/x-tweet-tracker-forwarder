@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { shouldEnableLinkPreview } from '../src/link-preview.js';
+import { canonicalizeUrl, shouldEnableLinkPreview } from '../src/link-preview.js';
 
 const sourceTweetUrl = 'https://x.com/kkulebaev/status/12345';
 
@@ -111,5 +111,42 @@ describe('shouldEnableLinkPreview', () => {
       reason: 'single_content_url_matches_source_tweet',
       contentUrlCount: 1,
     });
+  });
+
+  it('disables preview when there are no content-level URLs', () => {
+    const decision = shouldEnableLinkPreview({
+      mode: 'text',
+      message: '<b>Заголовок</b>\n\nВообще без ссылок',
+      sourceTweetUrl,
+    });
+
+    expect(decision).toEqual({
+      enabled: false,
+      reason: 'no_content_urls',
+      contentUrlCount: 0,
+    });
+  });
+
+  it('disables preview when the only URL is not the source tweet', () => {
+    const decision = shouldEnableLinkPreview({
+      mode: 'text',
+      message: '<b>Заголовок</b>\n\nhttps://example.com/not-the-source',
+      sourceTweetUrl,
+    });
+
+    expect(decision).toEqual({
+      enabled: false,
+      reason: 'single_content_url_not_source_tweet',
+      contentUrlCount: 1,
+    });
+  });
+
+  it('canonicalizes hosts, tracking params, html entities, and trailing punctuation', () => {
+    expect(canonicalizeUrl('https://www.twitter.com/kkulebaev/status/12345?s=46&utm_source=telegram&amp;keep=1,'))
+      .toBe('https://x.com/kkulebaev/status/12345?keep=1');
+  });
+
+  it('returns the sanitized original string when the URL is invalid', () => {
+    expect(canonicalizeUrl('not-a-real-url!!!')).toBe('not-a-real-url');
   });
 });
