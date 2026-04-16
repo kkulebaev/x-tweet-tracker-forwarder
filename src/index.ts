@@ -144,10 +144,19 @@ async function main() {
           ...logContext,
           mode: 'source_photo',
         });
-        await bot.api.sendPhoto(chatId, singlePhoto.url, {
-          caption,
-          parse_mode: 'HTML',
-        });
+        try {
+          await bot.api.sendPhoto(chatId, singlePhoto.url, {
+            caption,
+            parse_mode: 'HTML',
+          });
+        } catch (error) {
+          logger.warn('source_photo_send_failed', {
+            ...logContext,
+            photoUrl: singlePhoto.url,
+            error: serializeError(error),
+          });
+          throw error;
+        }
         logger.info('telegram_send_succeeded', {
           ...logContext,
           mode: 'source_photo',
