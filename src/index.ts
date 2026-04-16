@@ -24,6 +24,38 @@ function getSinglePhotoMedia(media: TweetEventMedia[] | undefined) {
   return single;
 }
 
+function inferPhotoFilename(photoUrl: string, contentType: string | null) {
+  if (contentType === 'image/png') return 'tweet.png';
+  if (contentType === 'image/webp') return 'tweet.webp';
+
+  const normalizedUrl = photoUrl.toLowerCase();
+  if (normalizedUrl.endsWith('.png')) return 'tweet.png';
+  if (normalizedUrl.endsWith('.webp')) return 'tweet.webp';
+
+  return 'tweet.jpg';
+}
+
+async function downloadPhotoAsInputFile(photoUrl: string) {
+  const response = await fetch(photoUrl, {
+    headers: {
+      'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
+      accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to download source photo: ${response.status} ${response.statusText}`);
+  }
+
+  const contentType = response.headers.get('content-type');
+  if (!contentType?.startsWith('image/')) {
+    throw new Error(`Unexpected source photo content-type: ${contentType ?? 'unknown'}`);
+  }
+
+  const bytes = await response.arrayBuffer();
+  return new InputFile(Buffer.from(bytes), inferPhotoFilename(photoUrl, contentType));
+}
+
 async function main() {
   const bot = new Bot(mustEnv('TELEGRAM_BOT_TOKEN'));
   const chatId = Number(mustEnv('TELEGRAM_CHAT_ID'));
@@ -145,7 +177,8 @@ async function main() {
           mode: 'source_photo',
         });
         try {
-          await bot.api.sendPhoto(chatId, singlePhoto.url, {
+          const sourcePhoto = await downloadPhotoAsInputFile(singlePhoto.url);
+          await bot.api.sendPhoto(chatId, sourcePhoto, {
             caption,
             parse_mode: 'HTML',
           });
