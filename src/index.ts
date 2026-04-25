@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { Bot, InputFile } from 'grammy';
 import { mustEnv } from './env.js';
 import { logger, serializeError } from './logger.js';
-import { generateStructuredTelegramPost, openRouterEnabled } from './openrouter-text.js';
+import { generateStructuredTelegramPost, isInvalidStructuredPostError, openRouterEnabled } from './openrouter-text.js';
 import { generateTelegramPostImage, openRouterImageEnabled } from './openrouter-image.js';
 import { canSendAsPhotoCaption, renderTelegramCaption, renderTelegramMessage } from './telegram-render.js';
 import { ack, autoClaimPending, closeRedis, ensureGroup, readOneNew, type TweetEventMedia } from './redis.js';
@@ -123,12 +123,32 @@ async function main() {
       }
 
       logger.info('structured_post_generation_started', logContext);
-      const generated = await generateStructuredTelegramPost({
-        xUsername: payload.xUsername,
-        url: payload.url,
-        text: payload.text,
-        sourceTweetId: payload.tweetId,
-      });
+
+      let generated;
+      try {
+        generated = await generateStructuredTelegramPost({
+          xUsername: payload.xUsername,
+          url: payload.url,
+          text: payload.text,
+          sourceTweetId: payload.tweetId,
+        });
+      } catch (error) {
+        if (!isInvalidStructuredPostError(error)) {
+          throw error;
+        }
+
+        logger.warn('stream_item_dropped_invalid_structured_post', {
+          ...logContext,
+          error: serializeError(error),
+        });
+        await ack(item.id);
+        logger.info('stream_item_acked', {
+          ...logContext,
+          reason: 'invalid_structured_post',
+        });
+        continue;
+      }
+
       const post = generated.post;
       logger.info('structured_post_generation_succeeded', {
         ...logContext,

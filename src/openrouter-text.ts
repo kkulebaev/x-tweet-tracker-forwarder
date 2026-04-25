@@ -20,6 +20,12 @@ export type StructuredGenerationResult = {
   configVersion: string;
 };
 
+export const INVALID_STRUCTURED_POST_ERROR_PREFIX = 'OpenRouter returned invalid structured post:';
+
+export function isInvalidStructuredPostError(error: unknown) {
+  return error instanceof Error && error.message.startsWith(INVALID_STRUCTURED_POST_ERROR_PREFIX);
+}
+
 function env(key: string) {
   return (process.env[key] ?? '').trim();
 }
@@ -214,7 +220,7 @@ async function generateStructuredTelegramPostWithArchetype(args: {
     errors: secondParsed.errors,
   });
 
-  const error = new Error(`OpenRouter returned invalid structured post: ${secondParsed.errors.join('; ')}`);
+  const error = new Error(`${INVALID_STRUCTURED_POST_ERROR_PREFIX} ${secondParsed.errors.join('; ')}`);
   logger.error('structured_post_generation_failed', {
     ...logContext,
     error: serializeError(error),
