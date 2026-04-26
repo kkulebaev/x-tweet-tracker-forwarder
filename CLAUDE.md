@@ -1,71 +1,71 @@
 # CLAUDE.md
 
-Этот файл содержит инструкции для Claude Code (claude.ai/code) при работе с кодом в этом репозитории.
+This file contains instructions for Claude Code (claude.ai/code) when working with code in this repository.
 
-## Команды
+## Commands
 
-- `npm run dev` — локальный запуск воркера через `tsx` (читает `.env` через `dotenv`)
-- `npm run typecheck` — `tsc --noEmit`, единственный источник истины для ошибок типов (отдельного шага линтинга нет)
-- `npm test` — `vitest run`. Используйте `npm run test:watch` для TDD, `npm run test:coverage` для покрытия V8
-- Одиночный тест: `npx vitest run tests/<file>.test.ts -t "<name pattern>"`
-- `npm run build` && `npm start` — компиляция в `dist/` и запуск продакшен-входа
-- `npm run dry-run:archetypes -- --author <user> --url <url> --text "<tweet>"` — прогон одного и того же твита через все архетипы для ручной проверки (также `--text-file`, `--json`)
-- Версия Node зафиксирована на `24.14.1` в `.nvmrc`, `package.json#engines` и базовом образе Docker — используйте `nvm use` перед установкой
+- `npm run dev` — run the worker locally via `tsx` (reads `.env` through `dotenv`)
+- `npm run typecheck` — `tsc --noEmit`, the single source of truth for type errors (there is no separate lint step)
+- `npm test` — `vitest run`. Use `npm run test:watch` for TDD, `npm run test:coverage` for V8 coverage
+- Single test: `npx vitest run tests/<file>.test.ts -t "<name pattern>"`
+- `npm run build` && `npm start` — compile to `dist/` and run the production entry point
+- `npm run dry-run:archetypes -- --author <user> --url <url> --text "<tweet>"` — run the same tweet through every archetype for manual inspection (also `--text-file`, `--json`)
+- The Node version is pinned to `24.14.1` in `.nvmrc`, `package.json#engines`, and the Docker base image — run `nvm use` before installing
 
-## Модель исполнения
+## Execution model
 
-Это **одноразовый воркер-сливщик** (one-shot drain), а не демон. `src/index.ts#main` крутится в цикле, пока Redis-стрим не опустеет, после чего корректно завершается. Предполагается запуск по расписанию (cron / Docker run).
+This is a **one-shot drain worker**, not a daemon. `src/index.ts#main` loops until the Redis stream is empty, then exits cleanly. It is meant to be run on a schedule (cron / Docker run).
 
-Тайминги зашиты в код:
-- скорость отправки: **1 сообщение в 30 секунд** (`delayMs` в `src/index.ts`)
-- порог реклейма зависших записей: **60 секунд простоя** через `XAUTOCLAIM`
-- таймаут блокировки `XREADGROUP`: **1500 мс** — когда возвращается пусто, цикл прерывается и процесс завершается
+Timings are hard-coded:
+- send rate: **1 message every 30 seconds** (`delayMs` in `src/index.ts`)
+- stuck-entry reclaim threshold: **60 seconds idle** via `XAUTOCLAIM`
+- `XREADGROUP` block timeout: **1500 ms** — when it returns empty, the loop breaks and the process exits
 
-Каждая итерация: сначала `XAUTOCLAIM` (восстановление застрявших записей из той же consumer-группы `forwarder`), затем `XREADGROUP` для новой записи, валидация, генерация, рендер, выбор способа доставки, отправка, `XACK`, сон. Некорректные пейлоады (без `url`) подтверждаются и пропускаются; ошибки валидации структурированного поста от OpenRouter (`isInvalidStructuredPostError`) также подтверждаются и отбрасываются (недавний фикс `0d0f774`).
+Each iteration: first `XAUTOCLAIM` (recovers stuck entries from the same `forwarder` consumer group), then `XREADGROUP` for a new entry, validation, generation, render, delivery-mode selection, send, `XACK`, sleep. Malformed payloads (missing `url`) are acked and skipped; structured-post validation errors from OpenRouter (`isInvalidStructuredPostError`) are also acked and dropped (recent fix `0d0f774`).
 
-## Архитектура
+## Architecture
 
-Пайплайн намеренно разбит на чистые модули вокруг императивного драйвера `index.ts`. Большая часть логики покрывается юнит-тестами; из покрытия исключены только `index.ts`, `openrouter-*.ts`, `redis.ts`, `env.ts`, `logger.ts` и `scripts/` (`vitest.config.ts`).
+The pipeline is intentionally split into pure modules around the imperative driver `index.ts`. Most of the logic is covered by unit tests; only `index.ts`, `openrouter-*.ts`, `redis.ts`, `env.ts`, `logger.ts`, and `scripts/` are excluded from coverage (`vitest.config.ts`).
 
-**Контракт стрима** (`src/redis.ts`)
-- Ключ стрима: `voyager:tweets`, consumer group: `forwarder`, имя консьюмера: `voyager-forwarder-1`
-- Записи содержат единственное поле `payload` с JSON, соответствующим `TweetEventPayload` (tweetId, xUsername, url, text, createdAt, опциональный `media[]`)
-- Все ответы `XREADGROUP` / `XAUTOCLAIM` проходят через type guards `isXReadGroupResponse` / `isAutoClaimResponse` — сохраняйте их при правках этого файла
+**Stream contract** (`src/redis.ts`)
+- Stream key: `voyager:tweets`, consumer group: `forwarder`, consumer name: `voyager-forwarder-1`
+- Entries contain a single `payload` field with JSON matching `TweetEventPayload` (tweetId, xUsername, url, text, createdAt, optional `media[]`)
+- All `XREADGROUP` / `XAUTOCLAIM` responses go through the type guards `isXReadGroupResponse` / `isAutoClaimResponse` — keep them when editing this file
 
-**Слой переписывания** (`src/openrouter-text.ts`, `src/rewrite-config.ts`, `src/system-prompt.ts`, `src/post-contract.ts`, `src/archetype-selector.ts`)
-- `rewriteConfig` (версионируется через `configVersion`) задаёт правила голоса, инварианты и **каталог архетипов** (`contrarian-take`, `mini-list`, `problem-insight`, `micro-story-takeaway`, `plain-punchline`). Каждый архетип ограничивает `allowedBlockTypes` и риторические приёмы.
-- Для боевых отправок `selectRandomArchetype` выбирает один равномерно; dry-run скрипт проходит по всем.
-- Системный промпт собирается из голоса + инвариантов + контракта выбранного архетипа + JSON-схемы вывода. Модель обязана вернуть строгий JSON `StructuredTelegramPost`; `parseStructuredTelegramPost` валидирует его (включая совпадение возвращённых `archetype`, `configVersion`, `sourceTweetId` с инжектированными, а также допустимость типов блоков в `allowedBlockTypes`).
-- Один автоматический ретрай при ошибке валидации, со списком ошибок валидатора, переданным обратно в диалог. Повторный сбой бросает `InvalidStructuredPostError` (распознаётся через `isInvalidStructuredPostError`).
+**Rewrite layer** (`src/openrouter-text.ts`, `src/rewrite-config.ts`, `src/system-prompt.ts`, `src/post-contract.ts`, `src/archetype-selector.ts`)
+- `rewriteConfig` (versioned via `configVersion`) defines voice rules, invariants, and the **archetype catalog** (`contrarian-take`, `mini-list`, `problem-insight`, `micro-story-takeaway`, `plain-punchline`). Each archetype constrains `allowedBlockTypes` and rhetorical devices.
+- For production sends, `selectRandomArchetype` picks one uniformly; the dry-run script iterates over all of them.
+- The system prompt is assembled from voice + invariants + the chosen archetype's contract + the JSON output schema. The model must return strict JSON `StructuredTelegramPost`; `parseStructuredTelegramPost` validates it (including that the returned `archetype`, `configVersion`, `sourceTweetId` match the injected ones, and that block types are within `allowedBlockTypes`).
+- One automatic retry on validation failure, with the validator error list fed back into the conversation. A repeat failure throws `InvalidStructuredPostError` (recognized via `isInvalidStructuredPostError`).
 
-**Политика доставки** (`src/delivery-policy.ts`)
-- Двухфазная: `classifyRawTweet` формирует `RawTweetSignals` на регулярных эвристиках (announcement/news/link/thread); `decideDeliveryMode` затем выбирает `source_photo` | `generated_photo` | `text`.
-- `source_photo` побеждает всегда, когда у твита ровно одно фото и отрендеренная подпись укладывается в лимит Telegram 1024 символа.
-- Иначе вычисляется eligibility: посты с announcement/news/link и любые посты с исходным фото **исключаются** из генерации. Подходящие посты делятся детерминированно 50/50 по SHA-256 от `tweetId || url` (`pickGenerationBucket`) — один и тот же твит всегда попадает в один и тот же бакет.
-- Константы `DELIVERY_TARGET_GENERATION_RATIO` и `DELIVERY_EXCLUDE_ANNOUNCEMENTS` намеренно живут в коде, а не в env (согласно README).
+**Delivery policy** (`src/delivery-policy.ts`)
+- Two-phase: `classifyRawTweet` builds `RawTweetSignals` from regex heuristics (announcement/news/link/thread); `decideDeliveryMode` then picks `source_photo` | `generated_photo` | `text`.
+- `source_photo` always wins when the tweet has exactly one photo and the rendered caption fits within Telegram's 1024-character limit.
+- Otherwise eligibility is computed: announcement/news/link posts and any posts with a source photo are **excluded** from generation. Eligible posts are split deterministically 50/50 by SHA-256 of `tweetId || url` (`pickGenerationBucket`) — the same tweet always lands in the same bucket.
+- The constants `DELIVERY_TARGET_GENERATION_RATIO` and `DELIVERY_EXCLUDE_ANNOUNCEMENTS` deliberately live in code, not env (per the README).
 
-**Рендер** (`src/telegram-render.ts`)
-- HTML-вывод (Telegram `parse_mode: 'HTML'`). `escapeHtml` выполняется до любой inline-трансформации; `@mentions` превращаются в ссылки `<a href="https://x.com/...">` через `renderInlineText`.
-- Два режима рендера: `renderTelegramCaption` (без URL, ужимается до целевых 900 символов под жёстким лимитом 1024) и `renderTelegramMessage` (с URL, цель 1400 символов, обрезка как крайняя мера). `compactPost` сжимает списки, затем длинные блоки, затем CTA, затем отбрасывает хвостовые блоки.
-- `buildFallbackStructuredPost` существует, но **не подключён** в `index.ts` — невалидные посты отбрасываются, а не рендерятся через fallback.
+**Rendering** (`src/telegram-render.ts`)
+- HTML output (Telegram `parse_mode: 'HTML'`). `escapeHtml` runs before any inline transformation; `@mentions` are turned into `<a href="https://x.com/...">` links via `renderInlineText`.
+- Two render modes: `renderTelegramCaption` (no URL, compacted toward 900 characters under the hard 1024 limit) and `renderTelegramMessage` (with URL, target 1400 characters, truncation as a last resort). `compactPost` shrinks lists, then long blocks, then the CTA, then drops trailing blocks.
+- `buildFallbackStructuredPost` exists but is **not wired into** `index.ts` — invalid posts are dropped rather than rendered via the fallback.
 
-**Решение о link preview** (`src/link-preview.ts`)
-- Включается только при `mode === 'text'`. Считает контентные URL в отрендеренном HTML (анкоры, не являющиеся ссылками `@mention`, + plaintext-URL).
-- Превью включается только если есть **ровно один** контентный URL и его канонизированная форма (`canonicalizeUrl` срезает tracking-параметры, нормализует `twitter.com → x.com`, убирает хвостовую пунктуацию) равна канонической ссылке исходного твита. Иначе ставится `link_preview_options: { is_disabled: true }`.
+**Link preview decision** (`src/link-preview.ts`)
+- Only enabled when `mode === 'text'`. Counts content URLs in the rendered HTML (anchors that are not `@mention` links + plaintext URLs).
+- Preview is enabled only if there is **exactly one** content URL and its canonical form (`canonicalizeUrl` strips tracking parameters, normalizes `twitter.com → x.com`, removes trailing punctuation) equals the canonical source-tweet URL. Otherwise `link_preview_options: { is_disabled: true }` is set.
 
-**Генерация изображений** (`src/openrouter-image.ts`)
-- Активна только при заданном `OPENROUTER_IMAGE_MODEL`. При сбое `index.ts` откатывается к текстовой отправке и заново вызывает `shouldEnableLinkPreview` для текстового пути (режимы логирования `text_with_preview_after_image_failure` / `text_after_image_failure`).
+**Image generation** (`src/openrouter-image.ts`)
+- Active only when `OPENROUTER_IMAGE_MODEL` is set. On failure, `index.ts` falls back to text delivery and re-invokes `shouldEnableLinkPreview` for the text path (logging modes `text_with_preview_after_image_failure` / `text_after_image_failure`).
 
-**Загрузка исходного фото** (`src/index.ts#downloadPhotoAsInputFile`)
-- Перезаливает исходное фото как `Buffer`, а не передаёт URL в Telegram (недавний фикс `7b41703`). Подменяет User-Agent на Chrome и определяет расширение по `content-type` или суффиксу URL.
+**Source photo upload** (`src/index.ts#downloadPhotoAsInputFile`)
+- Re-uploads the source photo as a `Buffer` rather than handing the URL to Telegram (recent fix `7b41703`). Spoofs the User-Agent to Chrome and infers the extension from `content-type` or the URL suffix.
 
-## Логирование
+## Logging
 
-Единственный структурированный логгер в `src/logger.ts` — пишет одну JSON-строку на событие с `ts`, `level`, `event` и произвольным контекстом. Ошибки нормализуются через `serializeError` (сохраняет `name`, `message`, `stack`, `cause`). При добавлении новых точек логирования используйте существующий стиль имён `event` (`snake_case`, с префиксом области: `redis_*`, `telegram_*`, `structured_post_*`, `image_generation_*`) — README и наблюдаемость завязаны на эти имена. Поля `decision_*` (`deliveryMode`, `decisionReasons`, `isGenerationEligible`, `generationBucket`, `linkPreviewEnabled`, `linkPreviewReason`, `contentUrlCount`) являются частью контракта для последующего анализа.
+The single structured logger lives in `src/logger.ts` — it writes one JSON line per event with `ts`, `level`, `event`, and arbitrary context. Errors are normalized through `serializeError` (preserves `name`, `message`, `stack`, `cause`). When adding new logging points, follow the existing `event` naming style (`snake_case`, prefixed by area: `redis_*`, `telegram_*`, `structured_post_*`, `image_generation_*`) — the README and observability are tied to these names. The `decision_*` fields (`deliveryMode`, `decisionReasons`, `isGenerationEligible`, `generationBucket`, `linkPreviewEnabled`, `linkPreviewReason`, `contentUrlCount`) are part of the contract for downstream analysis.
 
-## Соглашения, которые стоит сохранять
+## Conventions worth preserving
 
-- ESM везде (`"type": "module"`, `tsconfig` `module: ES2022`). Внутренние импорты используют расширение `.js` даже для исходников `.ts` — это требуется для ESM-резолва после компиляции.
-- Строгий TypeScript. Никакого `any`; используйте type guards (`isRecord`, `isStreamEntry` и т. п.) на любой границе, где встречается `unknown`.
-- `mustEnv(key)` — единственный санкционированный способ читать обязательные env-переменные; бросает при отсутствии или пустом значении.
-- Не вводите отдельный конфигурационный файл для архетипов/политики — `rewriteConfig` является единственным источником истины и версионируется через `configVersion` (поднимайте версию, если изменения архетипов должны инвалидировать ранее залогированные сравнения).
+- ESM throughout (`"type": "module"`, `tsconfig` `module: ES2022`). Internal imports use the `.js` extension even for `.ts` sources — this is required for ESM resolution after compilation.
+- Strict TypeScript. No `any`; use type guards (`isRecord`, `isStreamEntry`, etc.) at any boundary where `unknown` appears.
+- `mustEnv(key)` is the only sanctioned way to read required env vars; it throws on missing or empty values.
+- Do not introduce a separate config file for archetypes/policy — `rewriteConfig` is the single source of truth and is versioned via `configVersion` (bump it whenever archetype changes should invalidate previously logged comparisons).
