@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Drain Redis stream events and forward to Telegram group (Voyager).",
   "engines": {
-    "node": "24.14.1"
+    "node": "24.15.0"
   },
   "scripts": {
     "dev": "tsx src/index.ts",
